@@ -10,13 +10,13 @@ import { getFirestore, doc, getDoc, setDoc, addDoc, collection, query, where, on
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyCGZmWvLg8-8HYKQEo6srRH5HbY9VS2zB8",
-    authDomain: "voyago-travel-planner.firebaseapp.com",
-    projectId: "voyago-travel-planner",
-    storageBucket: "voyago-travel-planner.appspot.com",
-    messagingSenderId: "797731610521",
-    appId: "1:797731610521:web:d4197240c2eac32a3c3d08",
-    measurementId: "G-H8Z7PYMJ9X"
+  apiKey: "AIzaSyCGZmWvLg8-8HYKQEo6srRH5HbY9VS2zB8",
+  authDomain: "voyago-travel-planner.firebaseapp.com",
+  projectId: "voyago-travel-planner",
+  storageBucket: "voyago-travel-planner.firebasestorage.app",
+  messagingSenderId: "797731610521",
+  appId: "1:797731610521:web:d4197240c2eac32a3c3d08",
+  measurementId: "G-H8Z7PYMJ9X"
 };
 
 // Initialize Firebase
