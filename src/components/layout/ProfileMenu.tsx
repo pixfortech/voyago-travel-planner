@@ -17,18 +17,32 @@ interface AvatarCircleProps {
 }
 
 function AvatarCircle({ photoURL, displayName, initial, color, isAnonymous, size }: AvatarCircleProps) {
+  // Track whether the remote photo failed to load (Google photo URLs are often
+  // rate-limited (429) or blocked (403)). On error we fall back to initials.
+  const [imgFailed, setImgFailed] = useState(false)
+
+  // Reset the failure flag whenever the source changes (e.g. after re-login).
+  useEffect(() => {
+    setImgFailed(false)
+  }, [photoURL])
+
   const sizeClass = size === 'lg' ? 'w-10 h-10' : 'w-8 h-8'
   const textClass = size === 'lg' ? 'text-sm' : 'text-xs'
   const bg = isAnonymous ? '#94a3b8' : color
 
-  if (!isAnonymous && photoURL) {
+  const showPhoto = !isAnonymous && !!photoURL && !imgFailed
+
+  if (showPhoto) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={photoURL}
+        src={photoURL as string}
         alt={displayName}
-        className={`${sizeClass} rounded-full object-cover flex-shrink-0`}
+        width={size === 'lg' ? 40 : 32}
+        height={size === 'lg' ? 40 : 32}
+        className={`${sizeClass} rounded-full object-cover flex-shrink-0 bg-gray-100`}
         referrerPolicy="no-referrer"
+        onError={() => setImgFailed(true)}
       />
     )
   }
@@ -74,6 +88,19 @@ export default function ProfileMenu() {
   const initial = (displayName !== 'Guest' ? displayName : '?').charAt(0).toUpperCase()
   const color = profile?.color ?? '#94a3b8'
   const providerId = profile?.providerId ?? user?.providerData[0]?.providerId
+
+  // Dev-only diagnostic: surfaces whether a photo URL is available, without
+  // logging tokens or the URL contents themselves.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production' && user && !isAnonymous) {
+      console.log('[Voyago Avatar]', {
+        hasUserPhotoURL: !!user.photoURL,
+        hasProfilePhotoURL: !!profile?.photoURL,
+        willRenderPhoto: !!photoURL,
+        providerId,
+      })
+    }
+  }, [user, profile, isAnonymous, photoURL, providerId])
 
   const avatarProps: Omit<AvatarCircleProps, 'size'> = {
     photoURL,
