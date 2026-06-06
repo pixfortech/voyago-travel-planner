@@ -49,6 +49,20 @@ export interface Trip {
 
 export type ActivityType = 'hotel' | 'transport' | 'activity' | 'food' | 'other'
 
+export type ActivityCategory =
+  | 'sightseeing'
+  | 'food'
+  | 'hotel'
+  | 'transport'
+  | 'shopping'
+  | 'adventure'
+  | 'spiritual'
+  | 'leisure'
+  | 'emergency'
+  | 'other'
+
+export type BookingStatus = 'planned' | 'booked' | 'completed' | 'skipped' | 'cancelled'
+
 export interface Activity {
   id: string
   type: ActivityType
@@ -57,6 +71,14 @@ export interface Activity {
   time: string
   cost: number
   confirmed: boolean
+  // Phase 4 additions (optional for backward compat):
+  startTime?: string
+  endTime?: string
+  estimatedCost?: number
+  category?: ActivityCategory
+  locationName?: string
+  bookingStatus?: BookingStatus
+  updatedAt?: string
 }
 
 export interface ItineraryDay {
@@ -146,6 +168,8 @@ export interface SharedActivity {
   title: string
   time: string
   notes: string
+  startTime?: string
+  endTime?: string
 }
 
 export interface SharedDay {

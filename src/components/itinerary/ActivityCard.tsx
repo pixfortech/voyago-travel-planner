@@ -1,12 +1,22 @@
 'use client'
 
-import { Trash2, CheckCircle, Circle } from 'lucide-react'
-import { activityTypeIcon, formatCurrency } from '@/lib/utils'
-import type { Activity } from '@/types'
+import { Trash2, CheckCircle, Circle, Pencil } from 'lucide-react'
+import { activityTypeIcon, activityCategoryIcon, formatCurrency } from '@/lib/utils'
+import type { Activity, BookingStatus } from '@/types'
+
+const STATUS_CONFIG: Record<BookingStatus, { label: string; cls: string }> = {
+  planned: { label: 'Planned', cls: 'bg-gray-100 text-gray-500' },
+  booked: { label: 'Booked', cls: 'bg-blue-50 text-blue-600' },
+  completed: { label: 'Done', cls: 'bg-green-50 text-green-600' },
+  skipped: { label: 'Skipped', cls: 'bg-amber-50 text-amber-600' },
+  cancelled: { label: 'Cancelled', cls: 'bg-red-50 text-red-500' },
+}
 
 interface ActivityCardProps {
   activity: Activity
   currency: string
+  hasConflict?: boolean
+  onEdit: () => void
   onDelete: () => void
   onToggleConfirm: (confirmed: boolean) => void
 }
@@ -14,50 +24,106 @@ interface ActivityCardProps {
 export default function ActivityCard({
   activity,
   currency,
+  hasConflict = false,
+  onEdit,
   onDelete,
   onToggleConfirm,
 }: ActivityCardProps) {
+  const isCompleted =
+    activity.bookingStatus === 'completed' || (!activity.bookingStatus && activity.confirmed)
+
+  const icon = activity.category
+    ? activityCategoryIcon(activity.category)
+    : activityTypeIcon(activity.type)
+
+  const estimatedCost = activity.estimatedCost ?? activity.cost ?? 0
+
+  const timeDisplay = (() => {
+    const start = activity.startTime ?? activity.time
+    if (!start) return null
+    if (activity.endTime) return `${start} → ${activity.endTime}`
+    return start
+  })()
+
+  const status = activity.bookingStatus ?? (activity.confirmed ? 'completed' : 'planned')
+  const statusCfg = STATUS_CONFIG[status]
+
   return (
-    <div className="flex items-center gap-3 px-4 py-3 group hover:bg-gray-50 transition-colors">
-      <button
-        onClick={() => onToggleConfirm(!activity.confirmed)}
-        className="flex-shrink-0 text-gray-300 hover:text-primary-500 transition-colors"
-      >
-        {activity.confirmed ? (
-          <CheckCircle size={18} className="text-primary-500" />
-        ) : (
-          <Circle size={18} />
-        )}
-      </button>
-
-      <span className="text-lg flex-shrink-0">{activityTypeIcon(activity.type)}</span>
-
-      <div className="flex-1 min-w-0">
-        <p className={`text-sm font-semibold text-gray-900 truncate ${activity.confirmed ? 'line-through text-gray-400' : ''}`}>
-          {activity.title}
-        </p>
-        <div className="flex items-center gap-2 mt-0.5">
-          {activity.time && (
-            <span className="text-xs text-gray-400">{activity.time}</span>
+    <div className="px-4 py-3 group hover:bg-gray-50 transition-colors">
+      <div className="flex items-start gap-3">
+        {/* Confirm toggle */}
+        <button
+          onClick={() => onToggleConfirm(!isCompleted)}
+          className="flex-shrink-0 mt-0.5 text-gray-300 hover:text-primary-500 transition-colors"
+          aria-label={isCompleted ? 'Mark incomplete' : 'Mark complete'}
+        >
+          {isCompleted ? (
+            <CheckCircle size={18} className="text-primary-500" />
+          ) : (
+            <Circle size={18} />
           )}
+        </button>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-base leading-none">{icon}</span>
+            <p
+              className={`text-sm font-semibold ${
+                isCompleted ? 'line-through text-gray-400' : 'text-gray-900'
+              }`}
+            >
+              {activity.title}
+            </p>
+            {status !== 'planned' && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${statusCfg.cls}`}>
+                {statusCfg.label}
+              </span>
+            )}
+            {hasConflict && (
+              <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-full">
+                ⚠ Conflict
+              </span>
+            )}
+          </div>
+
+          {activity.locationName && (
+            <p className="text-xs text-gray-400 mt-0.5">📍 {activity.locationName}</p>
+          )}
+
+          {(timeDisplay || estimatedCost > 0) && (
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              {timeDisplay && <span className="text-xs text-gray-400">🕐 {timeDisplay}</span>}
+              {estimatedCost > 0 && (
+                <span className="text-xs font-medium text-gray-500">
+                  {formatCurrency(estimatedCost, currency)}
+                </span>
+              )}
+            </div>
+          )}
+
           {activity.notes && (
-            <span className="text-xs text-gray-400 truncate">{activity.notes}</span>
+            <p className="text-xs text-gray-400 mt-0.5 truncate">{activity.notes}</p>
           )}
         </div>
-      </div>
 
-      <div className="flex items-center gap-2 flex-shrink-0">
-        {activity.cost > 0 && (
-          <span className="text-xs font-semibold text-gray-600">
-            {formatCurrency(activity.cost, currency)}
-          </span>
-        )}
-        <button
-          onClick={onDelete}
-          className="p-1.5 rounded-lg text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-400 hover:bg-red-50 transition-all"
-        >
-          <Trash2 size={14} />
-        </button>
+        {/* Actions */}
+        <div className="flex items-center gap-1 flex-shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={onEdit}
+            className="p-1.5 rounded-lg text-gray-300 hover:text-primary-500 hover:bg-primary-50 transition-all"
+            aria-label="Edit activity"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded-lg text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all"
+            aria-label="Delete activity"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
       </div>
     </div>
   )

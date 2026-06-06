@@ -101,6 +101,23 @@ export function activityTypeIcon(type: string): string {
   )
 }
 
+export function activityCategoryIcon(category: string): string {
+  return (
+    {
+      sightseeing: '📸',
+      food: '🍽️',
+      hotel: '🏨',
+      transport: '✈️',
+      shopping: '🛍️',
+      adventure: '🏔️',
+      spiritual: '🙏',
+      leisure: '☕',
+      emergency: '🚨',
+      other: '📌',
+    }[category] ?? '📌'
+  )
+}
+
 export function expenseCategoryIcon(cat: string): string {
   return (
     {

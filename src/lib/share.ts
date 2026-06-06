@@ -90,13 +90,20 @@ export function buildSnapshot(
         dayNumber: d.dayNumber,
         date: d.date,
         activities: [...d.activities]
-          .sort((a, b) => a.time.localeCompare(b.time))
-          .map((a) => ({
-            type: a.type,
-            title: a.title,
-            time: a.time,
-            notes: a.notes,
-          })),
+          .sort((a, b) =>
+            (a.startTime ?? a.time ?? '').localeCompare(b.startTime ?? b.time ?? '')
+          )
+          .map((a) => {
+            const shared: import('@/types').SharedActivity = {
+              type: a.type,
+              title: a.title,
+              time: a.startTime ?? a.time,
+              notes: a.notes,
+            }
+            if (a.startTime) shared.startTime = a.startTime
+            if (a.endTime) shared.endTime = a.endTime
+            return shared
+          }),
       }))
     snapshot.itinerary = sharedDays
   }
