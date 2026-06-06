@@ -6,6 +6,43 @@ import Link from 'next/link'
 import { LogOut, Sparkles } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 
+interface AvatarCircleProps {
+  photoURL: string | null | undefined
+  displayName: string
+  initial: string
+  color: string
+  isAnonymous: boolean
+  /** 'sm' = w-8 h-8 (header trigger), 'lg' = w-10 h-10 (dropdown identity panel) */
+  size: 'sm' | 'lg'
+}
+
+function AvatarCircle({ photoURL, displayName, initial, color, isAnonymous, size }: AvatarCircleProps) {
+  const sizeClass = size === 'lg' ? 'w-10 h-10' : 'w-8 h-8'
+  const textClass = size === 'lg' ? 'text-sm' : 'text-xs'
+  const bg = isAnonymous ? '#94a3b8' : color
+
+  if (!isAnonymous && photoURL) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={photoURL}
+        alt={displayName}
+        className={`${sizeClass} rounded-full object-cover flex-shrink-0`}
+        referrerPolicy="no-referrer"
+      />
+    )
+  }
+
+  return (
+    <div
+      className={`${sizeClass} rounded-full flex items-center justify-center text-white font-black flex-shrink-0 ${textClass}`}
+      style={{ backgroundColor: bg }}
+    >
+      {isAnonymous ? '?' : initial}
+    </div>
+  )
+}
+
 export default function ProfileMenu() {
   const { profile, user, isAnonymous, signOut } = useApp()
   const [open, setOpen] = useState(false)
@@ -29,27 +66,21 @@ export default function ProfileMenu() {
     router.push('/')
   }
 
-  const photoURL = user?.photoURL
-  const displayName = profile?.name ?? 'Guest'
-  const email = profile?.email
-  const initial = displayName.charAt(0).toUpperCase()
+  // Prefer user.photoURL (live Firebase Auth value) over profile.photoURL (Firestore snapshot)
+  // so Google photo appears immediately after sign-in even before Firestore syncs.
+  const photoURL = user?.photoURL ?? profile?.photoURL
+  const displayName = profile?.name ?? user?.displayName ?? 'Guest'
+  const email = profile?.email ?? user?.email ?? undefined
+  const initial = (displayName !== 'Guest' ? displayName : '?').charAt(0).toUpperCase()
   const color = profile?.color ?? '#94a3b8'
-  const providerId = profile?.providerId
+  const providerId = profile?.providerId ?? user?.providerData[0]?.providerId
 
-  function Avatar({ size = 8, textSize = 'text-xs' }: { size?: number; textSize?: string }) {
-    const cls = `w-${size} h-${size} rounded-full overflow-hidden flex-shrink-0`
-    if (!isAnonymous && photoURL) {
-      // eslint-disable-next-line @next/next/no-img-element
-      return <img src={photoURL} alt={displayName} className={`${cls} object-cover`} />
-    }
-    return (
-      <div
-        className={`${cls} flex items-center justify-center text-white font-black ${textSize}`}
-        style={{ backgroundColor: isAnonymous ? '#94a3b8' : color }}
-      >
-        {isAnonymous ? '?' : initial}
-      </div>
-    )
+  const avatarProps: Omit<AvatarCircleProps, 'size'> = {
+    photoURL,
+    displayName,
+    initial,
+    color,
+    isAnonymous,
   }
 
   return (
@@ -63,15 +94,15 @@ export default function ProfileMenu() {
         aria-label="Account menu"
         aria-expanded={open}
       >
-        <Avatar size={8} textSize="text-xs" />
+        <AvatarCircle {...avatarProps} size="sm" />
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown — rendered in a portal-like absolute position above all content */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl shadow-gray-200/60 border border-gray-100 overflow-hidden z-50">
+        <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl shadow-gray-200/60 border border-gray-100 overflow-hidden z-[100]">
           {/* Identity section */}
           <div className="p-4 flex items-center gap-3">
-            <Avatar size={10} textSize="text-sm" />
+            <AvatarCircle {...avatarProps} size="lg" />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-gray-900 truncate">
                 {isAnonymous ? 'Guest' : displayName}

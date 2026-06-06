@@ -40,16 +40,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser)
-        if (!firebaseUser.isAnonymous) {
-          // Real user (Google or email) — sync Firestore profile with latest identity data
-          const p = await upsertUserProfile(firebaseUser)
-          setProfile(p)
-        } else {
-          // Anonymous guest — load any previously saved profile (e.g. display name)
-          const p = await getUserProfile(firebaseUser.uid)
-          setProfile(p)
+        try {
+          if (!firebaseUser.isAnonymous) {
+            // Real user (Google or email) — sync Firestore profile with latest identity data
+            const p = await upsertUserProfile(firebaseUser)
+            setProfile(p)
+          } else {
+            // Anonymous guest — load any previously saved profile (e.g. display name)
+            const p = await getUserProfile(firebaseUser.uid)
+            setProfile(p)
+          }
+        } catch (err) {
+          // Firestore write/read failed (rules, network, etc.).
+          // Still mark the user as signed-in using Firebase Auth data so the UI
+          // correctly reflects their identity even without a Firestore profile.
+          if (!firebaseUser.isAnonymous) {
+            setProfile({
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName ?? firebaseUser.email?.split('@')[0] ?? 'Traveller',
+              color: '#14b8a6',
+              email: firebaseUser.email ?? undefined,
+              photoURL: firebaseUser.photoURL,
+              providerId: firebaseUser.providerData[0]?.providerId,
+              createdAt: new Date().toISOString(),
+            })
+          }
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('[Voyago] Profile sync failed — using Firebase Auth data as fallback:', err)
+          }
+        } finally {
+          setLoading(false)
         }
-        setLoading(false)
       } else {
         // No user — sign in anonymously so every visitor gets a persistent session
         try {

@@ -148,6 +148,19 @@ trips, those trips are owned by their anonymous uid.
 When enabling the Google provider in Firebase Console you must set a **support
 email** for the OAuth consent screen (usually your project owner's email).
 
+### Credential-already-in-use flow
+
+When an anonymous user tries to sign in with Google but their Google account
+already has a Voyago account:
+1. `linkWithPopup` throws `auth/credential-already-in-use`
+2. Voyago extracts the Google credential from the error object with
+   `GoogleAuthProvider.credentialFromError(err)`
+3. Calls `signInWithCredential(auth, credential)` — **no second popup needed**
+4. The user is signed into their existing account in one interaction
+
+This avoids the browser popup-blocker problem that would occur if we opened
+a second popup immediately after the first one closed.
+
 ### User profile in Firestore
 
 Each real user gets a `users/{uid}` document with:
@@ -170,6 +183,24 @@ This document is private — only readable/writable by the owning user.
 ---
 
 ## Troubleshooting
+
+### Google sign-in popup completes but user stays logged out
+
+**Check in order:**
+
+1. **Google provider not enabled** — Firebase Console → Authentication → Sign-in method → Google must be **Enabled** with a support email set.
+
+2. **Domain not authorised** — Firebase Console → Authentication → Settings → Authorised domains. `localhost` must be listed for local dev. The error code is `auth/unauthorized-domain`; the app now shows a specific message for this.
+
+3. **Browser popup blocked** — After the user selects their Google account, if the browser blocked a follow-up request you'll see `auth/popup-blocked`. The app now shows "Allow popups for this site." Check the browser's address bar for a blocked popup icon.
+
+4. **Firebase project mismatch** — Confirm `NEXT_PUBLIC_FIREBASE_PROJECT_ID` in `.env.local` matches the project where you enabled Google auth.
+
+5. **Firestore profile write failing** — Open browser DevTools → Console (filter `[Voyago]`). A `[Voyago] Profile sync failed` log means `upsertUserProfile` threw. The user IS still signed in (auth state changed) but the Firestore write failed. Check Firestore rules are deployed (`firebase deploy --only firestore:rules`) and the `users/{uid}` rule allows the authenticated user to write.
+
+6. **Check the exact Firebase error code** — All auth errors from Firebase are logged to the browser console in development as `[Voyago Auth] ...`. Open DevTools → Console while attempting sign-in to see the exact `auth/*` error code.
+
+---
 
 ### `auth/configuration-not-found` or `auth/operation-not-allowed`
 
