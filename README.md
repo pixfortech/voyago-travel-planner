@@ -64,8 +64,8 @@ In the Firebase Console, enable these for your project:
 
 | Service | What to enable |
 | ------- | -------------- |
-| **Authentication → Sign-in method** | **Anonymous** (required), Email/Password (future), Google (future) |
-| **Authentication → Settings → Authorised domains** | Confirm `localhost` is listed |
+| **Authentication → Sign-in method** | **Anonymous** (required), **Email/Password** (required), **Google** (required) |
+| **Authentication → Settings → Authorised domains** | Confirm `localhost` is listed (add your deployed domain too) |
 | **Firestore Database** | Create a database (test mode for local dev, or apply `firestore.rules`) |
 | **Storage** | Enable Cloud Storage (`storage.rules` is staged and ready) |
 
@@ -103,9 +103,69 @@ Firebase Console → Firestore Database → Rules and Storage → Rules.
 
 > **What the rules enforce:** users can only read/write their own
 > `users/{uid}` profile; trips are readable/writable only by uids listed in the
-> trip's `members` array; `ownerId` and `members` are immutable on trip update;
-> nested `days`/`expenses` and any trip media inherit trip membership. Anonymous
+> trip's `members` array; only the owner may extend the members list (for future
+> collaboration); `ownerId` is immutable client-side (Admin SDK required to transfer
+> ownership); nested `days`/`expenses` and trip media inherit trip membership. Anonymous
 > users are fully supported (an anonymous uid is a normal `request.auth.uid`).
+
+---
+
+## Authentication (Phase 2C)
+
+Voyago supports three authentication paths, all managed through Firebase Auth:
+
+### Sign-in methods (all three must be enabled in Firebase Console)
+
+| Provider | Firebase Console path |
+| -------- | -------------------- |
+| **Anonymous** | Authentication → Sign-in method → Anonymous → Enable |
+| **Email/Password** | Authentication → Sign-in method → Email/Password → Enable |
+| **Google** | Authentication → Sign-in method → Google → Enable (set support email) |
+
+### Authorised domains
+
+Firebase Auth blocks sign-in popups from unlisted domains.
+
+- `localhost` — enabled by default, confirm it's listed
+- Your production domain (e.g. `voyago.app`) — add in Authentication → Settings → Authorised domains
+
+### Anonymous trip linking (how it works)
+
+Every visitor receives a silent anonymous Firebase session. When they create
+trips, those trips are owned by their anonymous uid.
+
+**When they sign up or sign in with Google/Email:**
+- Voyago calls `linkWithCredential` or `linkWithPopup` on the anonymous user.
+- If linking **succeeds** (new account), the uid is **preserved** — all existing
+  trips remain accessible without any data migration.
+- If linking **fails** (the credential already belongs to another account), the
+  user is signed into that existing account. Their anonymous trips stay on the
+  old anonymous uid and are not automatically migrated (this requires Firebase
+  Admin SDK / Cloud Functions, which is out of scope for Phase 2C).
+
+### Google OAuth support email
+
+When enabling the Google provider in Firebase Console you must set a **support
+email** for the OAuth consent screen (usually your project owner's email).
+
+### User profile in Firestore
+
+Each real user gets a `users/{uid}` document with:
+
+```json
+{
+  "id": "uid",
+  "name": "Display name",
+  "email": "user@example.com",
+  "photoURL": "https://... (Google only)",
+  "providerId": "google.com | password | anonymous",
+  "color": "#hex (for avatar fallback)",
+  "createdAt": "ISO string",
+  "lastLoginAt": "ISO string"
+}
+```
+
+This document is private — only readable/writable by the owning user.
 
 ---
 

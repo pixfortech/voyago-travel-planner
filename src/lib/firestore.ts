@@ -11,6 +11,7 @@ import {
   getDocs,
   orderBy,
 } from 'firebase/firestore'
+import type { User as FirebaseUser } from 'firebase/auth'
 import { db } from './firebase'
 import type {
   UserProfile,
@@ -32,6 +33,7 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   return snap.exists() ? (snap.data() as UserProfile) : null
 }
 
+/** Legacy helper used for anonymous users setting a display name. */
 export async function saveUserProfile(uid: string, name: string): Promise<UserProfile> {
   const profile: UserProfile = {
     id: uid,
@@ -40,6 +42,40 @@ export async function saveUserProfile(uid: string, name: string): Promise<UserPr
     createdAt: new Date().toISOString(),
   }
   await setDoc(doc(db, 'users', uid), profile)
+  return profile
+}
+
+/**
+ * Create or update the Firestore profile for a signed-in Firebase user.
+ * Called after Google sign-in, email sign-up, and every subsequent login
+ * to keep displayName / photoURL / lastLoginAt in sync.
+ * Uses merge so existing fields (color, createdAt) are not overwritten.
+ */
+export async function upsertUserProfile(
+  firebaseUser: FirebaseUser,
+  nameOverride?: string
+): Promise<UserProfile> {
+  const existing = await getUserProfile(firebaseUser.uid)
+  const now = new Date().toISOString()
+  const providerId = firebaseUser.providerData[0]?.providerId ?? 'anonymous'
+
+  const profile: UserProfile = {
+    id: firebaseUser.uid,
+    name:
+      nameOverride ??
+      firebaseUser.displayName ??
+      existing?.name ??
+      firebaseUser.email?.split('@')[0] ??
+      'Traveller',
+    color: existing?.color ?? generateTripColor(),
+    email: firebaseUser.email ?? undefined,
+    photoURL: firebaseUser.photoURL,
+    providerId,
+    createdAt: existing?.createdAt ?? now,
+    lastLoginAt: now,
+  }
+
+  await setDoc(doc(db, 'users', firebaseUser.uid), profile, { merge: true })
   return profile
 }
 

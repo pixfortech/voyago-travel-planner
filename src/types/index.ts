@@ -2,7 +2,12 @@ export interface UserProfile {
   id: string
   name: string
   color: string
+  email?: string
+  photoURL?: string | null
+  /** 'google.com' | 'password' | 'anonymous' */
+  providerId?: string
   createdAt: string
+  lastLoginAt?: string
 }
 
 export type TripType =
