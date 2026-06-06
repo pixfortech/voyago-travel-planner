@@ -5,7 +5,7 @@ import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import { expenseCategoryIcon } from '@/lib/utils'
-import type { ExpenseCategory, Expense } from '@/types'
+import type { ExpenseCategory, Expense, Traveller } from '@/types'
 
 const CATEGORIES: ExpenseCategory[] = [
   'accommodation',
@@ -19,6 +19,7 @@ const CATEGORIES: ExpenseCategory[] = [
 interface AddExpenseModalProps {
   open: boolean
   tripStartDate: string
+  travellers?: Traveller[]
   onClose: () => void
   onAdd: (expense: Omit<Expense, 'id' | 'tripId' | 'createdAt'>) => Promise<void>
 }
@@ -26,6 +27,7 @@ interface AddExpenseModalProps {
 export default function AddExpenseModal({
   open,
   tripStartDate,
+  travellers,
   onClose,
   onAdd,
 }: AddExpenseModalProps) {
@@ -34,8 +36,11 @@ export default function AddExpenseModal({
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(tripStartDate)
   const [notes, setNotes] = useState('')
+  const [paidByTravellerId, setPaidByTravellerId] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  const hasTravellers = (travellers?.length ?? 0) > 0
 
   function reset() {
     setCategory('food')
@@ -43,6 +48,7 @@ export default function AddExpenseModal({
     setAmount('')
     setDate(tripStartDate)
     setNotes('')
+    setPaidByTravellerId('')
     setError('')
   }
 
@@ -56,7 +62,19 @@ export default function AddExpenseModal({
     if (!title.trim()) { setError('Title is required'); return }
     if (!amount || parseFloat(amount) <= 0) { setError('Please enter a valid amount'); return }
     setSaving(true)
-    await onAdd({ category, title: title.trim(), amount: parseFloat(amount), date, notes: notes.trim() })
+
+    const paidBy = travellers?.find((t) => t.id === paidByTravellerId)
+    await onAdd({
+      category,
+      title: title.trim(),
+      amount: parseFloat(amount),
+      date,
+      notes: notes.trim(),
+      ...(paidBy
+        ? { paidByTravellerId: paidBy.id, paidByName: paidBy.name }
+        : {}),
+    })
+
     setSaving(false)
     reset()
     onClose()
@@ -88,10 +106,10 @@ export default function AddExpenseModal({
 
         <Input
           label="Title"
-          placeholder="e.g. Dinner at Nobu"
+          placeholder="e.g. Dinner at dhaba"
           value={title}
           onChange={(e) => { setTitle(e.target.value); setError('') }}
-          error={error && !amount ? error : title ? '' : error}
+          error={error && !title.trim() ? error : ''}
           autoFocus
         />
 
@@ -99,9 +117,9 @@ export default function AddExpenseModal({
           <Input
             label="Amount"
             type="number"
-            placeholder="0.00"
+            placeholder="0"
             min="0"
-            step="0.01"
+            step="1"
             value={amount}
             onChange={(e) => { setAmount(e.target.value); setError('') }}
           />
@@ -112,6 +130,24 @@ export default function AddExpenseModal({
             onChange={(e) => setDate(e.target.value)}
           />
         </div>
+
+        {hasTravellers && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Paid by</label>
+            <select
+              value={paidByTravellerId}
+              onChange={(e) => setPaidByTravellerId(e.target.value)}
+              className="w-full px-3 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent"
+            >
+              <option value="">Shared / not tracked</option>
+              {travellers?.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name || `Person ${travellers.indexOf(t) + 1}`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <Input
           label="Notes (optional)"

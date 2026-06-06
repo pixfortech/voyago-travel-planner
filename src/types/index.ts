@@ -5,7 +5,22 @@ export interface UserProfile {
   createdAt: string
 }
 
-export type TripType = 'solo' | 'couple' | 'group' | 'family'
+export type TripType =
+  | 'solo'
+  | 'couple'
+  | 'friends'
+  | 'group'
+  | 'family'
+  | 'office'
+  | 'pilgrimage'
+  | 'wedding'
+
+export interface Traveller {
+  id: string
+  name: string
+  color: string
+  initials: string
+}
 
 export interface Trip {
   id: string
@@ -20,6 +35,7 @@ export interface Trip {
   members: string[]
   coverColor: string
   notes: string
+  travellers?: Traveller[]
   createdAt: string
   updatedAt: string
 }
@@ -60,5 +76,9 @@ export interface Expense {
   amount: number
   date: string
   notes: string
+  paidByTravellerId?: string
+  paidByName?: string
+  splitType?: 'equal' | 'custom'
+  participants?: string[]
   createdAt: string
 }

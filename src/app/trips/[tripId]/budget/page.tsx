@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ArrowRight } from 'lucide-react'
 import { getTrip, getExpenses, addExpense, deleteExpense } from '@/lib/firestore'
 import AppShell from '@/components/layout/AppShell'
 import BudgetOverview from '@/components/budget/BudgetOverview'
 import AddExpenseModal from '@/components/budget/AddExpenseModal'
 import Button from '@/components/ui/Button'
 import { formatDate, formatCurrency, expenseCategoryIcon } from '@/lib/utils'
+import { getTravellerBalances, getSettlementSummary } from '@/lib/calculations'
 import type { Trip, Expense } from '@/types'
 
 export default function BudgetPage() {
@@ -55,6 +56,12 @@ export default function BudgetPage() {
 
   if (!trip) return null
 
+  const travellers = trip.travellers ?? []
+  const trackedExpenses = expenses.filter((e) => e.paidByTravellerId)
+  const showSettlement = travellers.length > 1 && trackedExpenses.length > 0
+  const balances = showSettlement ? getTravellerBalances(trackedExpenses, travellers) : []
+  const settlements = showSettlement ? getSettlementSummary(balances) : []
+
   return (
     <AppShell
       title="Budget"
@@ -69,6 +76,69 @@ export default function BudgetPage() {
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
         <BudgetOverview budget={trip.budget} currency={trip.currency} expenses={expenses} />
 
+        {/* Settlement summary */}
+        {showSettlement && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-50">
+              <p className="text-sm font-bold text-gray-700">Settlement</p>
+              <p className="text-xs text-gray-400 mt-0.5">Based on {trackedExpenses.length} tracked expense{trackedExpenses.length !== 1 ? 's' : ''}</p>
+            </div>
+
+            {/* Balances */}
+            <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-2 border-b border-gray-50">
+              {balances.map((b) => (
+                <div key={b.travellerId} className="flex items-center gap-2.5">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0"
+                    style={{ background: b.color }}
+                  >
+                    {travellers.find((t) => t.id === b.travellerId)?.initials || '?'}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-gray-900 truncate">{b.name}</p>
+                    <p
+                      className={`text-xs font-bold ${b.net >= 0 ? 'text-green-600' : 'text-red-500'}`}
+                    >
+                      {b.net >= 0 ? '+' : ''}
+                      {formatCurrency(b.net, trip.currency)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Who pays whom */}
+            {settlements.length > 0 ? (
+              <div className="divide-y divide-gray-50">
+                {settlements.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2 px-4 py-2.5">
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-black flex-shrink-0"
+                      style={{ background: s.fromColor }}
+                    >
+                      {travellers.find((t) => t.id === s.from)?.initials || '?'}
+                    </div>
+                    <span className="text-xs font-semibold text-gray-700 truncate max-w-[5rem]">{s.fromName}</span>
+                    <ArrowRight size={12} className="text-gray-300 flex-shrink-0" />
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-black flex-shrink-0"
+                      style={{ background: s.toColor }}
+                    >
+                      {travellers.find((t) => t.id === s.to)?.initials || '?'}
+                    </div>
+                    <span className="text-xs font-semibold text-gray-700 truncate max-w-[5rem]">{s.toName}</span>
+                    <span className="ml-auto text-xs font-bold text-gray-900 flex-shrink-0">
+                      {formatCurrency(s.amount, trip.currency)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="px-4 py-3 text-xs text-gray-400">All square — no settlements needed.</p>
+            )}
+          </div>
+        )}
+
         {/* Expense list */}
         {expenses.length > 0 && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -77,14 +147,25 @@ export default function BudgetPage() {
             </div>
             <div className="divide-y divide-gray-50">
               {expenses.map((expense) => (
-                <div key={expense.id} className="flex items-center gap-3 px-4 py-3 group hover:bg-gray-50">
+                <div
+                  key={expense.id}
+                  className="flex items-center gap-3 px-4 py-3 group hover:bg-gray-50"
+                >
                   <span className="text-xl flex-shrink-0">{expenseCategoryIcon(expense.category)}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">{expense.title}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <span className="text-xs text-gray-400 capitalize">{expense.category}</span>
                       <span className="text-gray-200">·</span>
                       <span className="text-xs text-gray-400">{formatDate(expense.date)}</span>
+                      {expense.paidByName && (
+                        <>
+                          <span className="text-gray-200">·</span>
+                          <span className="text-xs text-primary-500 font-medium">
+                            {expense.paidByName}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -117,6 +198,7 @@ export default function BudgetPage() {
       <AddExpenseModal
         open={modalOpen}
         tripStartDate={trip.startDate}
+        travellers={travellers.length > 0 ? travellers : undefined}
         onClose={() => setModalOpen(false)}
         onAdd={handleAddExpense}
       />

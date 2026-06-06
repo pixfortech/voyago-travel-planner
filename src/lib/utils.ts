@@ -38,8 +38,9 @@ export function getDatesInRange(startDate: string, endDate: string): string[] {
   )
 }
 
-export function formatCurrency(amount: number, currency = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
+export function formatCurrency(amount: number, currency = 'INR'): string {
+  const locale = currency === 'INR' ? 'en-IN' : 'en-US'
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
     minimumFractionDigits: 0,
@@ -68,7 +69,18 @@ export function generateId(): string {
 }
 
 export function tripTypeLabel(type: string): string {
-  return { solo: 'Solo', couple: 'Couple', group: 'Group', family: 'Family' }[type] ?? type
+  return (
+    {
+      solo: 'Solo',
+      couple: 'Couple',
+      friends: 'Friends',
+      group: 'Group',
+      family: 'Family',
+      office: 'Office Trip',
+      pilgrimage: 'Pilgrimage',
+      wedding: 'Wedding',
+    }[type] ?? type
+  )
 }
 
 export function activityTypeIcon(type: string): string {

@@ -3,21 +3,21 @@
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import {
-  Sparkles, ChevronRight, Lock, Map, Wallet, Share2, CalendarDays,
+  Sparkles, ChevronRight, Lock, Wallet, Share2, CalendarDays,
   MapPin, Camera, Users, Zap, Brain, Route,
 } from 'lucide-react'
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 
 const tripTypes = [
-  { label: 'Beach Getaway', from: 'from-cyan-400', to: 'to-blue-500', emoji: '🌴' },
-  { label: 'Family Trip',   from: 'from-amber-400', to: 'to-orange-500', emoji: '👨‍👩‍👧' },
-  { label: 'Honeymoon',     from: 'from-pink-400',  to: 'to-rose-500',   emoji: '💍' },
-  { label: 'Adventure',     from: 'from-emerald-400', to: 'to-teal-500', emoji: '🏔️' },
-  { label: 'Business',      from: 'from-slate-500', to: 'to-gray-700',   emoji: '💼' },
-  { label: 'Pilgrimage',    from: 'from-amber-500', to: 'to-yellow-500', emoji: '🛕' },
-  { label: 'Food Trail',    from: 'from-red-400',   to: 'to-orange-500', emoji: '🍜' },
-  { label: 'Weekend',       from: 'from-violet-400', to: 'to-indigo-500', emoji: '⚡' },
+  { label: 'Goa',       sub: 'Beach Escape',  from: 'from-cyan-400',    to: 'to-blue-500',    emoji: '🌴' },
+  { label: 'Rajasthan', sub: 'Heritage Tour', from: 'from-amber-400',   to: 'to-orange-500',  emoji: '🏰' },
+  { label: 'Kerala',    sub: 'Backwaters',    from: 'from-emerald-400', to: 'to-teal-500',    emoji: '🌊' },
+  { label: 'Himachal',  sub: 'Hill Station',  from: 'from-blue-500',    to: 'to-indigo-600',  emoji: '🏔️' },
+  { label: 'Varanasi',  sub: 'Pilgrimage',    from: 'from-amber-500',   to: 'to-yellow-500',  emoji: '🛕' },
+  { label: 'Andaman',   sub: 'Island Trip',   from: 'from-pink-400',    to: 'to-rose-500',    emoji: '🐚' },
+  { label: 'Ladakh',    sub: 'Road Trip',     from: 'from-violet-500',  to: 'to-purple-600',  emoji: '⛰️' },
+  { label: 'Mumbai',    sub: 'City Break',    from: 'from-red-400',     to: 'to-orange-500',  emoji: '🌆' },
 ]
 
 const features = [
@@ -78,7 +78,7 @@ const comingSoon = [
   },
 ]
 
-// ─── Hero trip card visual mockup ────────────────────────────────────────────
+// ─── Hero trip card visual mockup ─────────────────────────────────────────────
 
 function HeroTripCard() {
   return (
@@ -89,22 +89,22 @@ function HeroTripCard() {
 
       {/* Main mock card */}
       <div className="relative bg-white rounded-3xl shadow-2xl overflow-hidden">
-        <div className="h-2.5 bg-gradient-to-r from-primary-500 to-teal-400" />
+        <div className="h-2.5 bg-gradient-to-r from-amber-400 to-orange-500" />
         <div className="p-5 lg:p-6">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-[10px] font-black text-primary-500 uppercase tracking-widest">
-                Honeymoon
+              <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">
+                Friends Trip
               </p>
-              <p className="text-lg font-black text-gray-900 mt-0.5">Bali &amp; Lombok</p>
+              <p className="text-lg font-black text-gray-900 mt-0.5">Rajasthan Diaries</p>
             </div>
-            <span className="text-xs font-bold bg-primary-50 text-primary-600 px-3 py-1 rounded-full flex-shrink-0">
-              7 days
+            <span className="text-xs font-bold bg-amber-50 text-amber-600 px-3 py-1 rounded-full flex-shrink-0">
+              8 days
             </span>
           </div>
 
           <div className="grid grid-cols-3 gap-2 mb-4">
-            {[['Budget', '$3,200'], ['Days', '7'], ['Activities', '14']].map(([l, v]) => (
+            {[['Budget', '₹80,000'], ['Days', '8'], ['Stops', '12']].map(([l, v]) => (
               <div key={l} className="bg-gray-50 rounded-xl p-2.5 text-center">
                 <p className="text-[10px] text-gray-400 mb-0.5">{l}</p>
                 <p className="text-sm font-black text-gray-900">{v}</p>
@@ -114,12 +114,12 @@ function HeroTripCard() {
 
           <div className="space-y-2">
             {[
-              'Check-in Seminyak Resort',
-              'Tanah Lot Sunset Tour',
-              'Ubud Rice Terraces Walk',
+              'Heritage Haveli Check-in, Jaipur',
+              'Amber Fort & City Palace Tour',
+              'Sunset at Mehrangarh, Jodhpur',
             ].map((a, i) => (
               <div key={i} className="flex items-center gap-2.5 bg-gray-50 rounded-xl px-3 py-2">
-                <div className="w-1.5 h-1.5 bg-primary-400 rounded-full flex-shrink-0" />
+                <div className="w-1.5 h-1.5 bg-amber-400 rounded-full flex-shrink-0" />
                 <span className="text-xs text-gray-700 truncate">{a}</span>
               </div>
             ))}
@@ -130,7 +130,7 @@ function HeroTripCard() {
       {/* Floating budget badge */}
       <div className="absolute -bottom-3 -right-3 bg-white rounded-2xl shadow-xl px-4 py-3 text-center border border-gray-50">
         <p className="text-[10px] text-gray-400 mb-0.5">Budget left</p>
-        <p className="text-xl font-black text-green-500">$840</p>
+        <p className="text-xl font-black text-green-500">₹32,400</p>
       </div>
     </div>
   )
@@ -167,29 +167,29 @@ export default function Hero() {
         <div className="absolute top-1/3 left-1/3 w-80 h-80 bg-violet-600/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative max-w-7xl mx-auto px-4 lg:px-8 w-full flex flex-col lg:flex-row items-center gap-12 lg:gap-20">
-          {/* Left: copy */}
+          {/* Left: copy — no opacity-0 initial so page is never blank */}
           <motion.div
-            initial={{ opacity: 0, y: 28 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ y: 20 }}
+            animate={{ y: 0 }}
             transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
             className="flex-1 text-center lg:text-left"
           >
             <div className="inline-flex items-center gap-2 bg-primary-500/10 border border-primary-500/25 text-primary-400 text-xs font-bold px-4 py-2 rounded-full mb-6 tracking-widest uppercase">
               <Sparkles size={11} />
-              AI-Powered Travel Planning
+              India&apos;s Travel Planner
             </div>
 
             <h1 className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-black text-white leading-[1.05] mb-5 tracking-tight">
               Plan your perfect
               <br />
               <span className="bg-gradient-to-r from-primary-400 to-teal-300 bg-clip-text text-transparent">
-                trip in minutes
+                Indian trip
               </span>
             </h1>
 
             <p className="text-white/55 text-base lg:text-lg leading-relaxed mb-9 max-w-lg mx-auto lg:mx-0">
-              Build day-by-day itineraries, track your budget, and keep all your travel details in
-              one beautiful place.
+              From Goa beaches to Himalayan peaks — build day-by-day itineraries, track your budget
+              in ₹, and keep all your travel details in one beautiful place.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3 mb-10">
@@ -204,8 +204,8 @@ export default function Hero() {
 
             <div className="flex items-center justify-center lg:justify-start gap-10 pt-8 border-t border-white/10">
               {[
-                { value: '10+', label: 'Trip Types' },
-                { value: '∞', label: 'Destinations' },
+                { value: '12+', label: 'Destinations' },
+                { value: '₹', label: 'INR Native' },
                 { value: 'Free', label: 'Forever' },
               ].map((s) => (
                 <div key={s.label} className="text-center lg:text-left">
@@ -218,9 +218,9 @@ export default function Hero() {
 
           {/* Right: hero visual */}
           <motion.div
-            initial={{ opacity: 0, x: 32, scale: 0.97 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            transition={{ duration: 0.65, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
+            initial={{ x: 24, scale: 0.97 }}
+            animate={{ x: 0, scale: 1 }}
+            transition={{ duration: 0.65, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
             className="w-full lg:w-[400px] xl:w-[440px] flex-shrink-0 pb-6"
           >
             <HeroTripCard />
@@ -262,18 +262,18 @@ export default function Hero() {
           </div>
         </section>
 
-        {/* Trip types */}
+        {/* India destinations */}
         <section className="bg-gray-50 py-16 lg:py-20">
           <div className="max-w-7xl mx-auto px-4 lg:px-8">
             <div className="text-center mb-10">
               <p className="text-xs font-black text-primary-500 uppercase tracking-widest mb-2">
-                For Every Journey
+                Explore Incredible India
               </p>
               <h2 className="text-3xl lg:text-4xl font-black text-gray-900">
-                What kind of trip?
+                Where are you headed?
               </h2>
               <p className="text-gray-400 text-base mt-2">
-                Tell Voyago your trip type and it handles the rest.
+                Plan any trip across India — from mountains to beaches.
               </p>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 lg:gap-4">
@@ -289,7 +289,8 @@ export default function Hero() {
                   <div className="text-3xl lg:text-4xl mb-2 lg:mb-3" aria-hidden="true">
                     {t.emoji}
                   </div>
-                  <p className="text-sm lg:text-base font-bold">{t.label}</p>
+                  <p className="text-sm lg:text-base font-bold leading-tight">{t.label}</p>
+                  <p className="text-xs text-white/70 mt-0.5">{t.sub}</p>
                 </motion.div>
               ))}
             </div>
@@ -333,7 +334,9 @@ export default function Hero() {
         {/* CTA */}
         <section className="bg-gradient-to-br from-primary-700 via-primary-500 to-teal-500 py-16 lg:py-24">
           <div className="max-w-7xl mx-auto px-4 lg:px-8 text-center">
-            <h2 className="text-3xl lg:text-4xl font-black text-white mb-3">Ready to explore?</h2>
+            <h2 className="text-3xl lg:text-4xl font-black text-white mb-3">
+              Ready to explore India?
+            </h2>
             <p className="text-white/70 text-base mb-8 max-w-md mx-auto">
               Your perfect trip starts here. Free forever.
             </p>

@@ -16,6 +16,7 @@ import type {
   UserProfile,
   Trip,
   TripType,
+  Traveller,
   ItineraryDay,
   Activity,
   Expense,
@@ -68,6 +69,7 @@ export async function createTrip(
     budget: number
     currency: string
     notes: string
+    travellers?: Traveller[]
   }
 ): Promise<string> {
   const now = new Date().toISOString()
