@@ -47,8 +47,8 @@ export default function BottomNav({ tripId }: BottomNavProps) {
       ]
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-gray-100 safe-area-pb">
-      <div className="max-w-lg mx-auto px-3 flex">
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-gray-100 safe-area-pb">
+      <div className="max-w-3xl mx-auto px-3 flex">
         {items.map((item) => {
           const active = item.exact ? pathname === item.href : pathname.startsWith(item.href)
           return (

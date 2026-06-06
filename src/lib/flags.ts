@@ -21,7 +21,7 @@ export type FeatureFlag =
   | 'photoEditing' // Phase 8: non-destructive photo editing
   | 'collaboration' // Phase 9: invites, comments, voting, tasks
   | 'sharingLinks' // Phase 10: public/private share links, exports
-  | 'mapFeatures' // Phase 11 (experimental): map-aware travel time/grouping
+  | 'mapFeatures' // Phase 11: Google Maps — places, routing, travel times, itinerary map
   | 'faceGrouping' // Phase 11 (experimental): privacy-safe face grouping
 
 /** Experimental flags ship as "Coming soon" until fully built and reviewed. */

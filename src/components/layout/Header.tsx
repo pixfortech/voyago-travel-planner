@@ -15,7 +15,7 @@ export default function Header({ title, back, actions }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-gray-100/80 shadow-sm shadow-black/[0.04]">
-      <div className="max-w-lg mx-auto px-4 h-14 flex items-center gap-3">
+      <div className="w-full px-4 lg:px-8 h-14 flex items-center gap-3">
         {back && (
           <Link
             href={back}
