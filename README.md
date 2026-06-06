@@ -73,6 +73,42 @@ In the Firebase Console, enable these for your project:
 
 ---
 
+## Deploy security rules (required)
+
+Firestore and Storage were created in **production mode** (default deny), so
+**no reads or writes will work until the security rules in this repo are
+deployed**. The rules (`firestore.rules`, `storage.rules`) restrict every trip
+to its members — there is no public access. They cannot be deployed from CI/the
+Claude environment (no Firebase credentials), so run these locally **once** (and
+again whenever the rules change):
+
+```bash
+# 1. Install the Firebase CLI (one-time, if you don't have it)
+npm install -g firebase-tools
+
+# 2. Sign in to the Google account that owns the Firebase project
+firebase login
+
+# 3. From the repo root (the project is already set in .firebaserc), deploy both:
+firebase deploy --only firestore:rules,storage
+
+# …or deploy them individually:
+firebase deploy --only firestore:rules
+firebase deploy --only storage
+```
+
+`.firebaserc` already targets `voyago-travel-planner-ai`, so you don't need to
+pass `--project`. After a successful deploy you can confirm the rules in
+Firebase Console → Firestore Database → Rules and Storage → Rules.
+
+> **What the rules enforce:** users can only read/write their own
+> `users/{uid}` profile; trips are readable/writable only by uids listed in the
+> trip's `members` array; `ownerId` and `members` are immutable on trip update;
+> nested `days`/`expenses` and any trip media inherit trip membership. Anonymous
+> users are fully supported (an anonymous uid is a normal `request.auth.uid`).
+
+---
+
 ## Troubleshooting
 
 ### `auth/configuration-not-found` or `auth/operation-not-allowed`
@@ -96,6 +132,18 @@ instructions instead of crashing.
 
 **Fix:** Firebase Console → Authentication → **Settings** → Authorised domains →
 confirm `localhost` is listed (it usually is by default; if not, add it).
+
+---
+
+### `Missing or insufficient permissions` (Firestore) / `storage/unauthorized`
+
+**Cause:** Firestore/Storage are in production mode and the security rules in
+this repo haven't been deployed yet, so every request is denied by default.
+
+**Fix:** Deploy the rules — see [Deploy security rules](#deploy-security-rules-required)
+above (`firebase deploy --only firestore:rules,storage`). If it still fails,
+confirm you're signed in (anonymous auth enabled) — the rules require a
+`request.auth` and trip membership.
 
 ---
 

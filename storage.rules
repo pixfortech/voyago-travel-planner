@@ -1,13 +1,15 @@
 rules_version = '2';
 
-// Voyago Firebase Storage security rules — PREPARED in Phase 0, not yet deployed.
+// Voyago Firebase Storage security rules.
 //
-// Photos and receipts are not uploaded until Phase 7 (Photos). These rules are
-// staged now so the storage layout is governed from day one. Deploy with:
+// Storage was created in production mode (default deny), so these rules must be
+// deployed before any upload/download works:
 //   firebase deploy --only storage
 //
-// Access to a trip's media requires membership of that trip, checked against
-// Firestore. Avatars are private to each user.
+// Photos and receipts are not uploaded by the app until a later phase, but the
+// storage layout is governed from day one. Access to a trip's media requires
+// membership of that trip, cross-checked against the Firestore trip document.
+// Avatars are private to each user. There is NO public access.
 
 service firebase.storage {
   match /b/{bucket}/o {
