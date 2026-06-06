@@ -23,8 +23,12 @@ import type {
   Expense,
   ExpenseCategory,
   ActivityType,
+  Share,
+  ShareVisibility,
+  SharedTripSnapshot,
 } from '@/types'
 import { generateTripColor, generateId, getDatesInRange } from './utils'
+import { generateShareToken } from './share'
 
 // ── Users ──────────────────────────────────────────────────────────────────
 
@@ -230,4 +234,63 @@ export async function updateExpense(
 
 export async function deleteExpense(tripId: string, expenseId: string): Promise<void> {
   await deleteDoc(doc(db, 'trips', tripId, 'expenses', expenseId))
+}
+
+// ── Sharing ──────────────────────────────────────────────────────────────
+//
+// shares/{shareId} holds a read-only public snapshot. Rules permit anyone to
+// read it only when enabled === true; the owner may always read/write their own.
+// The snapshot contains only the sections the owner enabled (see buildSnapshot),
+// so disabled data is never written to a publicly-readable document.
+
+export async function getShare(shareId: string): Promise<Share | null> {
+  try {
+    const snap = await getDoc(doc(db, 'shares', shareId))
+    return snap.exists() ? ({ id: snap.id, ...snap.data() } as Share) : null
+  } catch {
+    // Rules deny reads of disabled shares to non-owners → treat as not available.
+    return null
+  }
+}
+
+/**
+ * Create or overwrite the share document for a trip and point the trip at it.
+ * Pass an existing `shareId` to update in place (preserves createdAt); omit it
+ * to create a fresh token. Returns the share token used.
+ */
+export async function saveShare(
+  trip: Trip,
+  snapshot: SharedTripSnapshot,
+  opts: { enabled: boolean; visibility: ShareVisibility; shareId?: string }
+): Promise<string> {
+  const shareId = opts.shareId ?? generateShareToken()
+  const now = new Date().toISOString()
+  const existing = opts.shareId ? await getShare(opts.shareId) : null
+
+  await setDoc(doc(db, 'shares', shareId), {
+    tripId: trip.id,
+    ownerId: trip.ownerId,
+    enabled: opts.enabled,
+    visibility: opts.visibility,
+    snapshot,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  })
+
+  // Point the trip at the (possibly new) share token. members/ownerId untouched
+  // so this satisfies the standard trip-update rule.
+  if (trip.shareId !== shareId) {
+    await updateDoc(doc(db, 'trips', trip.id), { shareId, updatedAt: now })
+  }
+
+  return shareId
+}
+
+/** Delete a share document (used when regenerating to a new token). */
+export async function deleteShare(shareId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'shares', shareId))
+  } catch {
+    // Best-effort cleanup of the old token; ignore if already gone.
+  }
 }

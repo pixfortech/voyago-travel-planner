@@ -41,6 +41,8 @@ export interface Trip {
   coverColor: string
   notes: string
   travellers?: Traveller[]
+  /** Token pointing at the current shares/{shareId} document, if sharing was ever set up. */
+  shareId?: string
   createdAt: string
   updatedAt: string
 }
@@ -120,4 +122,100 @@ export interface Expense {
   locationName?: string
   linkedActivityId?: string
   createdAt: string
+}
+
+// ── Trip sharing (Phase 3) ────────────────────────────────────────────────
+//
+// Sharing uses a *public snapshot* model. The shares/{shareId} document holds a
+// pre-computed, read-only snapshot of ONLY the sections the owner chose to expose.
+// Disabled sections are never written, so a public reader can never see hidden
+// data even by reading the raw document. The live trip / expenses documents stay
+// private to members.
+
+export interface ShareVisibility {
+  itinerary: boolean
+  travellers: boolean
+  budget: boolean
+  expenseBreakdown: boolean
+  settlement: boolean
+  notes: boolean
+}
+
+export interface SharedActivity {
+  type: ActivityType
+  title: string
+  time: string
+  notes: string
+}
+
+export interface SharedDay {
+  dayNumber: number
+  date: string
+  activities: SharedActivity[]
+}
+
+// Public-safe traveller: name, initials, colour only. No id or email.
+export interface SharedTraveller {
+  name: string
+  initials: string
+  color: string
+}
+
+export interface SharedCategoryTotal {
+  category: ExpenseCategory
+  total: number
+}
+
+export interface SharedVendorTotal {
+  vendorType: VendorType
+  total: number
+}
+
+export interface SharedSettlement {
+  fromName: string
+  fromColor: string
+  toName: string
+  toColor: string
+  amount: number
+}
+
+export interface SharedBudget {
+  budget: number
+  spent: number
+  remaining: number
+  perHeadBudget: number
+  perHeadSpent: number
+}
+
+// The denormalised, read-only public view. Optional sections are present ONLY
+// when the owner enabled the matching visibility flag.
+export interface SharedTripSnapshot {
+  name: string
+  destination: string
+  type: TripType
+  startDate: string
+  endDate: string
+  coverColor: string
+  currency: string
+  dayCount: number
+  activityCount: number
+  itinerary?: SharedDay[]
+  travellers?: SharedTraveller[]
+  travellerCount?: number
+  budget?: SharedBudget
+  categoryBreakdown?: SharedCategoryTotal[]
+  vendorBreakdown?: SharedVendorTotal[]
+  settlement?: SharedSettlement[]
+  notes?: string
+}
+
+export interface Share {
+  id: string
+  tripId: string
+  ownerId: string
+  enabled: boolean
+  visibility: ShareVisibility
+  snapshot: SharedTripSnapshot
+  createdAt: string
+  updatedAt: string
 }

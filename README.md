@@ -182,6 +182,58 @@ This document is private — only readable/writable by the owning user.
 
 ---
 
+## Trip sharing (Phase 3)
+
+Owners can publish a **read-only** link so others can view a trip without logging
+in and without any ability to edit.
+
+### How it works — public snapshot model
+
+Sharing does **not** expose the live trip or expense documents. Instead, a
+separate `shares/{shareId}` document stores a **denormalised snapshot** containing
+only the sections the owner chose to expose:
+
+```
+shares/{shareId} {
+  tripId, ownerId, enabled,
+  visibility: { itinerary, travellers, budget, expenseBreakdown, settlement, notes },
+  snapshot:   { ...only the enabled sections... },
+  createdAt, updatedAt
+}
+```
+
+- `shareId` is an unguessable ~22-char random token, also stored on the trip as `trip.shareId`.
+- Disabled sections are **never written** into the snapshot, so a public reader
+  cannot see hidden data even by inspecting the raw document.
+- Traveller **email addresses and ids are never included** — only name, initials, colour.
+- Itinerary activities expose title/time/notes only (no costs or ids).
+- The snapshot is regenerated whenever the owner changes share settings, so it
+  reflects the trip at the time settings were last saved.
+
+### Privacy-safe defaults
+
+When sharing is first enabled: **basic summary + itinerary** are visible.
+Budget, expense breakdown, settlement, traveller list, and notes are **off** until
+the owner explicitly turns them on. Enabling any financial section shows a
+confirmation prompt and a persistent on-page warning.
+
+### Routes
+
+- `/trips/[tripId]/share` — owner-only share settings (enable/disable, copy link, regenerate, per-section visibility toggles).
+- `/share/[shareId]` — public read-only page. No login required. Shows a polished trip summary; if the link is disabled or invalid it shows a "not available" page.
+
+### Security rules
+
+The `shares/{shareId}` rules allow public read **only when `enabled == true`**;
+disabled shares are readable only by their owner, and only the owner (matching
+`ownerId`) may create/update/delete. Deploy after pulling Phase 3:
+
+```bash
+firebase deploy --only firestore:rules
+```
+
+---
+
 ## Troubleshooting
 
 ### Google sign-in popup completes but user stays logged out

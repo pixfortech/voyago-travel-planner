@@ -38,6 +38,32 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
+    // Share snapshots (Phase 3 — public read-only trip sharing).
+    //
+    // shares/{shareId} holds a denormalised, read-only snapshot containing ONLY
+    // the sections the owner chose to expose (see buildSnapshot). It does NOT
+    // grant any access to the underlying trip/expense documents.
+    //
+    //   • Public read is allowed ONLY when enabled == true — anyone (including
+    //     logged-out visitors) can read an enabled share. Disabled shares are
+    //     readable only by their owner.
+    //   • Only the trip owner (matching ownerId) may create, update, or delete.
+    match /shares/{shareId} {
+      allow read: if resource.data.enabled == true
+        || (isSignedIn() && request.auth.uid == resource.data.ownerId);
+
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.ownerId;
+
+      // Owner may update their share but cannot change its ownerId.
+      allow update: if isSignedIn()
+        && request.auth.uid == resource.data.ownerId
+        && request.resource.data.ownerId == resource.data.ownerId;
+
+      allow delete: if isSignedIn()
+        && request.auth.uid == resource.data.ownerId;
+    }
+
     // Trips: members can read; creator must own and include self in members.
     // Update has two permitted shapes:
     //   1. Standard data update — ownerId and members unchanged (anyone in members).
