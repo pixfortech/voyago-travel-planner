@@ -184,6 +184,14 @@ export async function addExpense(
   return ref.id
 }
 
+export async function updateExpense(
+  tripId: string,
+  expenseId: string,
+  updates: Partial<Omit<Expense, 'id' | 'tripId' | 'createdAt'>>
+): Promise<void> {
+  await updateDoc(doc(db, 'trips', tripId, 'expenses', expenseId), updates)
+}
+
 export async function deleteExpense(tripId: string, expenseId: string): Promise<void> {
   await deleteDoc(doc(db, 'trips', tripId, 'expenses', expenseId))
 }

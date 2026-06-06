@@ -48,6 +48,18 @@ export function formatCurrency(amount: number, currency = 'INR'): string {
   }).format(amount)
 }
 
+// Precise variant (always 2 decimals) for per-head shares and settlement amounts,
+// where sub-rupee values like ₹426.50 must be shown exactly.
+export function formatCurrencyPrecise(amount: number, currency = 'INR'): string {
+  const locale = currency === 'INR' ? 'en-IN' : 'en-US'
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)
+}
+
 export function generateTripColor(): string {
   const colors = [
     '#14b8a6',
@@ -99,5 +111,33 @@ export function expenseCategoryIcon(cat: string): string {
       shopping: '🛍️',
       other: '📌',
     }[cat] ?? '📌'
+  )
+}
+
+export function vendorTypeIcon(type: string): string {
+  return (
+    {
+      restaurant: '🍽️',
+      hotel: '🏨',
+      transport: '🚗',
+      tickets: '🎟️',
+      shopping: '🛍️',
+      emergency: '🚑',
+      miscellaneous: '📦',
+    }[type] ?? '📦'
+  )
+}
+
+export function vendorTypeLabel(type: string): string {
+  return (
+    {
+      restaurant: 'Restaurant',
+      hotel: 'Hotel',
+      transport: 'Transport',
+      tickets: 'Tickets',
+      shopping: 'Shopping',
+      emergency: 'Emergency',
+      miscellaneous: 'Miscellaneous',
+    }[type] ?? type
   )
 }
