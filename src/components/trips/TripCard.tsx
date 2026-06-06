@@ -21,17 +21,17 @@ export default function TripCard({ trip, onDelete }: TripCardProps) {
       className="relative group"
     >
       <Link href={`/trips/${trip.id}`} className="block">
-        <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-          {/* Color banner */}
-          <div className="h-2" style={{ backgroundColor: trip.coverColor }} />
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+          {/* Color accent banner */}
+          <div className="h-2.5" style={{ backgroundColor: trip.coverColor }} />
 
           <div className="p-4">
             <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-bold text-gray-900 text-base leading-tight">{trip.name}</h3>
-                <div className="flex items-center gap-1 mt-0.5 text-gray-500">
-                  <MapPin size={12} />
-                  <span className="text-xs">{trip.destination}</span>
+              <div className="flex-1 min-w-0 pr-2">
+                <h3 className="font-bold text-gray-900 text-base leading-tight truncate">{trip.name}</h3>
+                <div className="flex items-center gap-1 mt-0.5 text-gray-400">
+                  <MapPin size={11} />
+                  <span className="text-xs truncate">{trip.destination}</span>
                 </div>
               </div>
               <span
@@ -42,17 +42,17 @@ export default function TripCard({ trip, onDelete }: TripCardProps) {
               </span>
             </div>
 
-            <div className="flex items-center gap-4 text-xs text-gray-500">
+            <div className="flex items-center gap-3 text-xs text-gray-400">
               <span className="flex items-center gap-1">
-                <Calendar size={12} />
+                <Calendar size={11} />
                 {formatShortDate(trip.startDate)} – {formatShortDate(trip.endDate)}
               </span>
               <span className="flex items-center gap-1">
-                <Users size={12} />
+                <Users size={11} />
                 {days} {days === 1 ? 'day' : 'days'}
               </span>
               {trip.budget > 0 && (
-                <span className="ml-auto font-semibold text-primary-600">
+                <span className="ml-auto font-bold text-primary-600">
                   {formatCurrency(trip.budget, trip.currency)}
                 </span>
               )}
@@ -67,9 +67,9 @@ export default function TripCard({ trip, onDelete }: TripCardProps) {
             e.preventDefault()
             onDelete(trip.id)
           }}
-          className="absolute top-3 right-3 p-1.5 rounded-lg bg-white/80 text-gray-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm"
+          className="absolute top-3 right-3 p-1.5 rounded-lg bg-white/90 text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm border border-gray-100"
         >
-          <Trash2 size={14} />
+          <Trash2 size={13} />
         </button>
       )}
     </motion.div>

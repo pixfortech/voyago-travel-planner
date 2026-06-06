@@ -47,21 +47,21 @@ export default function BottomNav({ tripId }: BottomNavProps) {
       ]
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-gray-100 safe-area-pb">
-      <div className="max-w-lg mx-auto px-2 flex">
+    <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-gray-100 safe-area-pb">
+      <div className="max-w-lg mx-auto px-3 flex">
         {items.map((item) => {
           const active = item.exact ? pathname === item.href : pathname.startsWith(item.href)
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors',
-                active ? 'text-primary-600' : 'text-gray-400 hover:text-gray-600'
-              )}
-            >
-              {item.icon}
-              {item.label}
+            <Link key={item.href} href={item.href} className="flex-1 flex justify-center py-1.5">
+              <div
+                className={cn(
+                  'flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl transition-all text-xs font-medium',
+                  active ? 'bg-primary-50 text-primary-600' : 'text-gray-400 hover:text-gray-600'
+                )}
+              >
+                {item.icon}
+                {item.label}
+              </div>
             </Link>
           )
         })}

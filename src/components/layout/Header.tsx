@@ -14,7 +14,7 @@ export default function Header({ title, back, actions }: HeaderProps) {
   const { profile } = useApp()
 
   return (
-    <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-sm border-b border-gray-100">
+    <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-gray-100/80 shadow-sm shadow-black/[0.04]">
       <div className="max-w-lg mx-auto px-4 h-14 flex items-center gap-3">
         {back && (
           <Link
@@ -28,8 +28,10 @@ export default function Header({ title, back, actions }: HeaderProps) {
         {title ? (
           <h1 className="flex-1 font-bold text-gray-900 text-base truncate">{title}</h1>
         ) : (
-          <Link href="/" className="flex-1 flex items-center gap-1">
-            <span className="text-lg font-black text-primary-600 tracking-tight">Voya</span>
+          <Link href="/" className="flex-1 flex items-center gap-0.5">
+            <span className="text-lg font-black bg-gradient-to-r from-primary-600 to-teal-500 bg-clip-text text-transparent tracking-tight">
+              Voya
+            </span>
             <span className="text-lg font-black text-gray-900 tracking-tight">GO</span>
           </Link>
         )}
@@ -38,7 +40,7 @@ export default function Header({ title, back, actions }: HeaderProps) {
 
         {!actions && !back && profile && (
           <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
             style={{ backgroundColor: profile.color }}
           >
             {profile.name.charAt(0).toUpperCase()}
