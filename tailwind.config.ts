@@ -1,6 +1,9 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
+  // Prepared for Phase 1 dark mode. No `.dark` class is applied anywhere yet,
+  // so enabling this has no visual effect in Phase 0.
+  darkMode: 'class',
   content: [
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -9,6 +12,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Existing teal scale — unchanged, still used by all current components.
         primary: {
           50: '#f0fdfa',
           100: '#ccfbf1',
@@ -21,6 +25,17 @@ const config: Config = {
           800: '#115e59',
           900: '#134e4a',
         },
+        // Semantic design tokens (Phase 0 foundation). Backed by CSS variables in
+        // globals.css so Phase 1 can introduce theming/dark mode without touching
+        // component markup. Not referenced by any component yet.
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
+        card: 'var(--card)',
+        'card-foreground': 'var(--card-foreground)',
+        muted: 'var(--muted)',
+        'muted-foreground': 'var(--muted-foreground)',
+        border: 'var(--border)',
+        accent: 'var(--accent)',
       },
       fontFamily: {
         sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],

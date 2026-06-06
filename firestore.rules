@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// Voyago Firestore security rules — PREPARED in Phase 0, not yet deployed.
+//
+// These align with the CURRENT data model (trips carry `ownerId` + `members[]`).
+// Phase 9 (collaboration) will migrate to a `collaborators{}` map; these rules
+// will be updated alongside that change. Deploy with:  firebase deploy --only firestore:rules
+//
+// Principle: a signed-in user may only read or write trips they belong to, and
+// the nested days/expenses/photos/etc. of those trips. No public access.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // A user is a member of an existing trip document.
+    function isTripMember(tripId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/trips/$(tripId))
+        && request.auth.uid in get(/databases/$(database)/documents/trips/$(tripId)).data.members;
+    }
+
+    // User profiles: a user may only read/write their own profile.
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Trips: members can read and update/delete; creator must include self in members.
+    match /trips/{tripId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.members;
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.ownerId
+        && request.auth.uid in request.resource.data.members;
+      allow update, delete: if isSignedIn() && request.auth.uid in resource.data.members;
+
+      // Nested collections inherit access from trip membership.
+      match /{sub=**} {
+        allow read, write: if isTripMember(tripId);
+      }
+    }
+  }
+}

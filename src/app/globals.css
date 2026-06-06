@@ -3,6 +3,34 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Design token foundation (Phase 0).
+   * These CSS variables back the semantic Tailwind color tokens. They are
+   * defined here but not yet applied to any component, so there is no visual
+   * change. Phase 1 introduces a theme toggle that flips `.dark` on <html>.
+   */
+  :root {
+    --background: #f9fafb; /* gray-50 */
+    --foreground: #111827; /* gray-900 */
+    --card: #ffffff;
+    --card-foreground: #111827;
+    --muted: #f3f4f6; /* gray-100 */
+    --muted-foreground: #6b7280; /* gray-500 */
+    --border: #f3f4f6; /* gray-100 */
+    --accent: #14b8a6; /* primary-500 */
+  }
+
+  .dark {
+    --background: #0b1220;
+    --foreground: #e5e7eb;
+    --card: #111827;
+    --card-foreground: #e5e7eb;
+    --muted: #1f2937;
+    --muted-foreground: #9ca3af;
+    --border: #1f2937;
+    --accent: #2dd4bf; /* primary-400 */
+  }
+
   html {
     -webkit-tap-highlight-color: transparent;
   }

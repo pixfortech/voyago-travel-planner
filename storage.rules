@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// Voyago Firebase Storage security rules — PREPARED in Phase 0, not yet deployed.
+//
+// Photos and receipts are not uploaded until Phase 7 (Photos). These rules are
+// staged now so the storage layout is governed from day one. Deploy with:
+//   firebase deploy --only storage
+//
+// Access to a trip's media requires membership of that trip, checked against
+// Firestore. Avatars are private to each user.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Cross-check trip membership against the Firestore trip document.
+    function isTripMember(tripId) {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/trips/$(tripId))
+        && request.auth.uid in firestore.get(/databases/(default)/documents/trips/$(tripId)).data.members;
+    }
+
+    // Trip media (photos, receipts): members of the trip only.
+    match /trips/{tripId}/{allPaths=**} {
+      allow read, write: if isTripMember(tripId);
+    }
+
+    // User avatars: each user may only manage their own.
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}
