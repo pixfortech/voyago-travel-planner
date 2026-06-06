@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { cn } from '@/lib/utils'
 import Header from './Header'
 import BottomNav from './BottomNav'
 
@@ -22,7 +23,9 @@ export default function AppShell({
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header title={title} back={back} actions={actions} />
-      <main className="flex-1 max-w-lg mx-auto w-full px-4 pt-4 pb-24">{children}</main>
+      <main className={cn('flex-1 max-w-lg mx-auto w-full px-4 pt-4', hideNav ? 'pb-8' : 'pb-24')}>
+        {children}
+      </main>
       {!hideNav && <BottomNav tripId={tripId} />}
     </div>
   )

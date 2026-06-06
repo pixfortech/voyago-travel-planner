@@ -54,7 +54,7 @@ export default function ActivityCard({
         )}
         <button
           onClick={onDelete}
-          className="p-1.5 rounded-lg text-gray-300 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-50 transition-all"
+          className="p-1.5 rounded-lg text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-400 hover:bg-red-50 transition-all"
         >
           <Trash2 size={14} />
         </button>

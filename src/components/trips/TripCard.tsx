@@ -67,7 +67,7 @@ export default function TripCard({ trip, onDelete }: TripCardProps) {
             e.preventDefault()
             onDelete(trip.id)
           }}
-          className="absolute top-3 right-3 p-1.5 rounded-lg bg-white/80 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm"
+          className="absolute top-3 right-3 p-1.5 rounded-lg bg-white/80 text-gray-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm"
         >
           <Trash2 size={14} />
         </button>

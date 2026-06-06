@@ -11,12 +11,11 @@ import {
   Map,
   Pencil,
   Trash2,
-  ExternalLink,
+  Share2,
 } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import { getTrip, deleteTrip, getExpenses } from '@/lib/firestore'
 import AppShell from '@/components/layout/AppShell'
-import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import { formatDate, getDayCount, tripTypeLabel, formatCurrency } from '@/lib/utils'
 import type { Trip, Expense } from '@/types'
@@ -78,12 +77,26 @@ export default function TripOverviewPage() {
       back="/dashboard"
       tripId={tripId}
       actions={
-        <button
-          onClick={handleDelete}
-          className="p-2 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
-        >
-          <Trash2 size={18} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <Link
+            href={`/trips/${tripId}/edit`}
+            className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors"
+          >
+            <Pencil size={18} />
+          </Link>
+          <Link
+            href={`/trips/${tripId}/share`}
+            className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors"
+          >
+            <Share2 size={18} />
+          </Link>
+          <button
+            onClick={handleDelete}
+            className="p-2 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <Trash2 size={18} />
+          </button>
+        </div>
       }
     >
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
