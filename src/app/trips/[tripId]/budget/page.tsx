@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Plus, Trash2, MapPin } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import {
   getTrip,
   getExpenses,
@@ -14,17 +14,9 @@ import {
 import AppShell from '@/components/layout/AppShell'
 import BudgetOverview from '@/components/budget/BudgetOverview'
 import TravellerLedger from '@/components/budget/TravellerLedger'
-import SettlementTracker from '@/components/budget/SettlementTracker'
+import ExpenseCard from '@/components/budget/ExpenseCard'
 import AddExpenseModal from '@/components/budget/AddExpenseModal'
 import Button from '@/components/ui/Button'
-import {
-  formatDate,
-  formatCurrency,
-  formatCurrencyPrecise,
-  expenseCategoryIcon,
-  vendorTypeLabel,
-} from '@/lib/utils'
-import { getExpenseSharesPaise, toRupees } from '@/lib/calculations'
 import type { Trip, Expense } from '@/types'
 
 export default function BudgetPage() {
@@ -58,14 +50,12 @@ export default function BudgetPage() {
     setExpenses((prev) => prev.filter((e) => e.id !== expenseId))
   }
 
-  // Toggle one participant's "received" status on a tracked expense.
+  // Toggle one participant's "received" status — optimistic update + persist.
   async function handleToggleReceived(expense: Expense, travellerId: string) {
     const settled = new Set(expense.settledParticipantIds ?? [])
     if (settled.has(travellerId)) settled.delete(travellerId)
     else settled.add(travellerId)
     const settledParticipantIds = Array.from(settled)
-
-    // Optimistic local update, then persist.
     setExpenses((prev) =>
       prev.map((e) => (e.id === expense.id ? { ...e, settledParticipantIds } : e))
     )
@@ -87,7 +77,7 @@ export default function BudgetPage() {
   const travellers = trip.travellers ?? []
   const travellerCount = Math.max(travellers.length, 1)
   const trackedExpenses = expenses.filter((e) => e.paidByTravellerId)
-  const showGroup = travellers.length > 1 && trackedExpenses.length > 0
+  const showLedger = travellers.length > 1 && trackedExpenses.length > 0
 
   return (
     <AppShell
@@ -101,6 +91,8 @@ export default function BudgetPage() {
       }
     >
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+
+        {/* ── Analytics overview ── */}
         <BudgetOverview
           budget={trip.budget}
           currency={trip.currency}
@@ -108,109 +100,68 @@ export default function BudgetPage() {
           travellerCount={travellerCount}
         />
 
-        {showGroup && (
-          <>
-            <TravellerLedger
-              expenses={trackedExpenses}
-              travellers={travellers}
-              currency={trip.currency}
-            />
-            <SettlementTracker
-              expenses={trackedExpenses}
-              travellers={travellers}
-              currency={trip.currency}
-              onToggleReceived={handleToggleReceived}
-            />
-          </>
+        {/* ── Traveller ledger (only when tracked expenses exist) ── */}
+        {showLedger && (
+          <TravellerLedger
+            expenses={trackedExpenses}
+            travellers={travellers}
+            currency={trip.currency}
+          />
         )}
 
-        {/* Expense list */}
-        {expenses.length > 0 && (
+        {/* ── Expense list ── */}
+        {expenses.length > 0 ? (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-50">
-              <p className="text-sm font-bold text-gray-700">All Expenses</p>
+            <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between">
+              <p className="text-sm font-bold text-gray-700">
+                Expenses
+                <span className="ml-1.5 text-xs font-normal text-gray-400">
+                  ({expenses.length})
+                </span>
+              </p>
+              <button
+                type="button"
+                onClick={() => setModalOpen(true)}
+                className="text-xs font-semibold text-primary-600 hover:text-primary-700 transition-colors"
+              >
+                + Add
+              </button>
             </div>
-            <div className="divide-y divide-gray-50">
-              {expenses.map((expense) => {
-                const shareValues = Array.from(
-                  getExpenseSharesPaise(expense, travellers).values()
-                )
-                const splitCount = shareValues.length
-                const perHead = splitCount > 0 ? toRupees(shareValues[0]) : 0
-                return (
-                  <div
-                    key={expense.id}
-                    className="flex items-center gap-3 px-4 py-3 group hover:bg-gray-50"
-                  >
-                    <span className="text-xl flex-shrink-0">
-                      {expenseCategoryIcon(expense.category)}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">
-                        {expense.title}
-                      </p>
-                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                        <span className="text-xs text-gray-400 capitalize">
-                          {expense.category}
-                        </span>
-                        <span className="text-gray-200">·</span>
-                        <span className="text-xs text-gray-400">{formatDate(expense.date)}</span>
-                        {expense.vendorType && (
-                          <>
-                            <span className="text-gray-200">·</span>
-                            <span className="text-xs text-gray-400">
-                              {vendorTypeLabel(expense.vendorType)}
-                            </span>
-                          </>
-                        )}
-                        {expense.locationName && (
-                          <>
-                            <span className="text-gray-200">·</span>
-                            <span className="inline-flex items-center gap-0.5 text-xs text-gray-400">
-                              <MapPin size={10} /> {expense.locationName}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      {expense.paidByName && travellers.length > 1 && (
-                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                          <span className="text-[11px] text-primary-500 font-medium">
-                            {expense.paidByName} paid
-                          </span>
-                          <span className="text-gray-200">·</span>
-                          <span className="text-[11px] text-gray-400">
-                            split {splitCount} · {formatCurrencyPrecise(perHead, trip.currency)}/head
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="text-sm font-bold text-gray-900">
-                        {formatCurrency(expense.amount, trip.currency)}
-                      </span>
-                      <button
-                        onClick={() => handleDelete(expense.id)}
-                        className="p-1.5 rounded-lg text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-400 hover:bg-red-50 transition-all"
-                        aria-label="Delete expense"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+            {expenses.map((expense) => (
+              <ExpenseCard
+                key={expense.id}
+                expense={expense}
+                travellers={travellers}
+                currency={trip.currency}
+                onToggleReceived={handleToggleReceived}
+                onDelete={handleDelete}
+              />
+            ))}
           </div>
-        )}
-
-        {expenses.length === 0 && (
-          <div className="text-center py-10">
-            <p className="text-gray-400 text-sm mb-4">No expenses recorded yet.</p>
+        ) : (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 text-center">
+            {travellers.length > 1 ? (
+              <>
+                <p className="text-3xl mb-3">💸</p>
+                <p className="text-sm font-semibold text-gray-700 mb-1">No expenses yet</p>
+                <p className="text-xs text-gray-400 mb-5 max-w-xs mx-auto leading-relaxed">
+                  Add an expense and choose who paid — Voyago will calculate splits and track
+                  how much each person owes the payer.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-3xl mb-3">💰</p>
+                <p className="text-sm font-semibold text-gray-700 mb-1">No expenses yet</p>
+                <p className="text-xs text-gray-400 mb-5">Start tracking your trip spending.</p>
+              </>
+            )}
             <Button onClick={() => setModalOpen(true)}>
               <Plus size={16} /> Add First Expense
             </Button>
           </div>
         )}
+
       </motion.div>
 
       <AddExpenseModal
