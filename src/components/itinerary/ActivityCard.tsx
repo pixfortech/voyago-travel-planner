@@ -1,7 +1,8 @@
 'use client'
 
-import { Trash2, CheckCircle, Circle, Pencil } from 'lucide-react'
+import { Trash2, CheckCircle, Circle, Pencil, Star } from 'lucide-react'
 import { activityTypeIcon, activityCategoryIcon, formatCurrency } from '@/lib/utils'
+import { priceLevelSymbol, formatRating } from '@/lib/maps/config'
 import type { Activity, BookingStatus } from '@/types'
 
 const STATUS_CONFIG: Record<BookingStatus, { label: string; cls: string }> = {
@@ -48,6 +49,11 @@ export default function ActivityCard({
   const status = activity.bookingStatus ?? (activity.confirmed ? 'completed' : 'planned')
   const statusCfg = STATUS_CONFIG[status]
 
+  // Place metadata (Phase 6) — only shown when present.
+  const placeLine = activity.placeAddress || activity.locationName
+  const rating = formatRating(activity.placeRating)
+  const price = priceLevelSymbol(activity.priceLevel)
+
   return (
     <div className="px-4 py-3 group hover:bg-gray-50 transition-colors">
       <div className="flex items-start gap-3">
@@ -87,8 +93,24 @@ export default function ActivityCard({
             )}
           </div>
 
-          {activity.locationName && (
-            <p className="text-xs text-gray-400 mt-0.5">📍 {activity.locationName}</p>
+          {placeLine && (
+            <p className="text-xs text-gray-400 mt-0.5 truncate">📍 {placeLine}</p>
+          )}
+
+          {(rating || price) && (
+            <div className="flex items-center gap-2 mt-0.5">
+              {rating && (
+                <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-amber-600">
+                  <Star size={11} className="fill-amber-400 text-amber-400" /> {rating}
+                  {activity.placeUserRatingsTotal != null && (
+                    <span className="text-gray-400 font-normal">
+                      ({activity.placeUserRatingsTotal})
+                    </span>
+                  )}
+                </span>
+              )}
+              {price && <span className="text-xs font-semibold text-gray-500">{price}</span>}
+            </div>
           )}
 
           {(timeDisplay || estimatedCost > 0) && (

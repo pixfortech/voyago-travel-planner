@@ -358,20 +358,71 @@ key value).
 
 ---
 
-## Google Maps (future)
+## Google Maps planning (Phase 6)
 
-Google Maps integration is planned for a future phase (gated behind the
-`NEXT_PUBLIC_FLAG_MAP_FEATURES` feature flag). Planned features:
+Maps-powered planning adds Google **place search** (attach a real place, with
+rating and price level, to an itinerary activity) and **route estimates**
+(travel time + distance between a day's placed activities). It is **optional and
+gated** — the app builds and runs fully without any Google key, falling back to
+manual location entry.
 
-- Place search via Google Places API
-- Ratings, review counts, price level, opening hours
-- Travel time and distance between itinerary stops
-- Day-wise route optimisation
-- Interactive trip map
+### Two gates
 
-When the integration ships, you will need a `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
-with the **Maps JavaScript API**, **Places API**, and **Directions API** enabled
-in Google Cloud Console. The key is not needed today.
+A maps feature is active only when **both** are true:
+
+1. The feature flag is on: `NEXT_PUBLIC_FLAG_MAP_FEATURES=true`
+2. A Google Maps API key is configured (see below)
+
+If the flag is off → the UI shows **Coming Soon**. If the flag is on but no key
+is set → **Setup required**. Either way, manual itinerary planning keeps working.
+
+### Keys & env vars
+
+All Google calls happen in server API routes, so the key stays server-side:
+
+| Var | Scope | Purpose |
+| --- | ----- | ------- |
+| `GOOGLE_MAPS_API_KEY` | **server-only** (recommended) | Place search + route estimates |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | public (optional) | Reserved for future in-browser map rendering; the server falls back to it if the server-only key is unset |
+
+```bash
+# .env.local — enable maps locally
+NEXT_PUBLIC_FLAG_MAP_FEATURES=true
+GOOGLE_MAPS_API_KEY=AIza...        # server-only; never returned to the client
+```
+
+### Required Google APIs
+
+Enable these in Google Cloud Console for the project that owns the key:
+
+- **Places API (New)** — text place search (`places:searchText`)
+- **Distance Matrix API** — travel time/distance between consecutive activities
+
+(If you later add an interactive map, also enable the **Maps JavaScript API** and
+use the public `NEXT_PUBLIC_` key for it.)
+
+### Restricting the key
+
+- **Server-only key** (`GOOGLE_MAPS_API_KEY`): restrict by **server IP address**
+  (Application restrictions → IP addresses) and by **API** (Places + Distance
+  Matrix only).
+- **Public key** (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`): restrict by **HTTP
+  referrer** (your domains) and by API. Never use the public key for server
+  routes if you can avoid it.
+
+### How it behaves
+
+- **Place search** lives in the Add/Edit Activity form. With maps available you
+  can search and attach a Google place; otherwise you type a location manually.
+  Manual entry is always offered as a fallback link.
+- **Route planning** is a separate section on the itinerary page. It is
+  **user-triggered only** — press *Calculate route & time* per day. Nothing is
+  auto-called, and route results are kept in memory (never written to Firestore).
+- Only a small set of place fields (id, name, address, rating, ratings count,
+  price level, lat/lng) is stored on an activity — never raw Google responses.
+- The app never requests your browser location.
+- `GET /api/maps/status` reports `{ featureEnabled, configured, available }`
+  without ever revealing the key.
 
 ---
 

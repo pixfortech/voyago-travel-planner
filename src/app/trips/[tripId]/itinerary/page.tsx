@@ -10,7 +10,11 @@ import AppShell from '@/components/layout/AppShell'
 import DaySection from '@/components/itinerary/DaySection'
 import AddActivityModal from '@/components/itinerary/AddActivityModal'
 import BudgetCoachCard from '@/components/ai/BudgetCoachCard'
-import type { Trip, ItineraryDay, Activity, Expense } from '@/types'
+import RoutePlanningSection from '@/components/maps/RoutePlanningSection'
+import { useMapsStatus } from '@/lib/maps/useMapsStatus'
+import type {
+  Trip, ItineraryDay, Activity, Expense, BudgetCoachRouteSummary,
+} from '@/types'
 
 export default function ItineraryPage() {
   const { tripId } = useParams<{ tripId: string }>()
@@ -22,6 +26,9 @@ export default function ItineraryPage() {
 
   const [addingDayId, setAddingDayId] = useState<string | null>(null)
   const [editingActivity, setEditingActivity] = useState<{ dayId: string; activity: Activity } | null>(null)
+  const [routeSummary, setRouteSummary] = useState<BudgetCoachRouteSummary | undefined>(undefined)
+
+  const { status: mapsStatus } = useMapsStatus()
 
   useEffect(() => {
     if (!tripId) return
@@ -203,10 +210,27 @@ export default function ItineraryPage() {
           ))
         )}
 
-        {/* AI Budget Coach — planned itinerary vs budget */}
+        {/* Maps & route planning (gated; manual entry always works) */}
+        {days.length > 0 && (
+          <div className="pt-1">
+            <RoutePlanningSection
+              days={days}
+              status={mapsStatus}
+              onAggregate={setRouteSummary}
+            />
+          </div>
+        )}
+
+        {/* AI Budget Coach — planned itinerary vs budget (+ route summary if any) */}
         {trip && totalEstimated > 0 && (
           <div className="pt-1">
-            <BudgetCoachCard trip={trip} expenses={expenses} days={days} variant="itinerary" />
+            <BudgetCoachCard
+              trip={trip}
+              expenses={expenses}
+              days={days}
+              variant="itinerary"
+              routeSummary={routeSummary}
+            />
           </div>
         )}
       </motion.div>

@@ -30,6 +30,27 @@ import type {
 import { generateTripColor, generateId, getDatesInRange } from './utils'
 import { generateShareToken } from './share'
 
+/**
+ * Recursively drop keys whose value is `undefined`. Firestore rejects undefined
+ * values (including inside arrays/objects), and activities now carry many
+ * optional fields (Phase 4 times, Phase 6 place metadata) that are frequently
+ * absent. Pruning keeps writes safe without forcing every caller to set nulls.
+ */
+function pruneUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((v) => pruneUndefined(v)) as unknown as T
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v === undefined) continue
+      out[k] = pruneUndefined(v)
+    }
+    return out as T
+  }
+  return value
+}
+
 // ── Users ──────────────────────────────────────────────────────────────────
 
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
@@ -164,7 +185,7 @@ export async function addActivity(
   dayId: string,
   activity: Omit<Activity, 'id'>
 ): Promise<Activity> {
-  const full: Activity = { ...activity, id: generateId() }
+  const full: Activity = pruneUndefined({ ...activity, id: generateId() })
   const dayRef = doc(db, 'trips', tripId, 'days', dayId)
   const snap = await getDoc(dayRef)
   if (!snap.exists()) return full
@@ -184,7 +205,7 @@ export async function updateActivity(
   if (!snap.exists()) return
   const current = snap.data() as ItineraryDay
   const activities = current.activities.map((a) =>
-    a.id === activityId ? { ...a, ...updates } : a
+    a.id === activityId ? pruneUndefined({ ...a, ...updates }) : a
   )
   await updateDoc(dayRef, { activities })
 }

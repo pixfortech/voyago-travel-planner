@@ -6,9 +6,10 @@ import { motion } from 'framer-motion'
 import {
   MapPin, Calendar, Users, Wallet, Map, Pencil, Trash2, Share2,
   Sparkles, Camera, Lock, Plus, ChevronRight, CheckCircle2, Circle,
-  TrendingUp, UserPlus,
+  TrendingUp, UserPlus, Navigation,
 } from 'lucide-react'
 import { getTrip, deleteTrip, getExpenses } from '@/lib/firestore'
+import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import AppShell from '@/components/layout/AppShell'
 import Badge from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -33,6 +34,7 @@ export default function TripOverviewPage() {
   const [trip, setTrip] = useState<Trip | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
+  const { status: mapsStatus } = useMapsStatus()
 
   useEffect(() => {
     if (!tripId) return
@@ -306,6 +308,34 @@ export default function TripOverviewPage() {
                   </p>
                 </div>
               </Link>
+
+              {/* Maps & Routes — active only when Google Maps is configured */}
+              {mapsStatus.available ? (
+                <Link href={`/trips/${tripId}/itinerary#route-planning`}>
+                  <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-sky-200 hover:-translate-y-0.5 transition-all cursor-pointer">
+                    <div className="w-10 h-10 bg-gradient-to-br from-sky-500 to-blue-500 rounded-xl flex items-center justify-center mb-3 shadow-sm shadow-sky-500/20">
+                      <Navigation size={20} className="text-white" />
+                    </div>
+                    <p className="font-bold text-gray-900 text-sm">Maps &amp; Routes</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Plan routes &amp; places</p>
+                  </div>
+                </Link>
+              ) : (
+                <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative overflow-hidden opacity-70">
+                  <div className="absolute top-2.5 right-2.5">
+                    <span className="inline-flex items-center gap-1 bg-primary-100 text-primary-600 text-[10px] font-black px-2 py-0.5 rounded-full">
+                      <Lock size={8} /> {mapsStatus.featureEnabled && !mapsStatus.configured ? 'Setup' : 'Soon'}
+                    </span>
+                  </div>
+                  <div className="w-10 h-10 bg-gradient-to-br from-sky-400 to-blue-500 rounded-xl flex items-center justify-center mb-3">
+                    <Navigation size={20} className="text-white" />
+                  </div>
+                  <p className="font-bold text-gray-500 text-sm">Maps &amp; Routes</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {mapsStatus.featureEnabled && !mapsStatus.configured ? 'Add API key' : 'Place search & routes'}
+                  </p>
+                </div>
+              )}
 
               <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative overflow-hidden opacity-70">
                 <div className="absolute top-2.5 right-2.5">

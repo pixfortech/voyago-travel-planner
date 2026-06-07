@@ -79,6 +79,16 @@ export interface Activity {
   locationName?: string
   bookingStatus?: BookingStatus
   updatedAt?: string
+  // Phase 6 — Google Maps place metadata (all optional; manual entry still works):
+  placeId?: string
+  placeName?: string
+  placeAddress?: string
+  placeRating?: number
+  placeUserRatingsTotal?: number
+  /** 0 (free) – 4 (very expensive), per Google price levels. */
+  priceLevel?: number
+  lat?: number
+  lng?: number
 }
 
 export interface ItineraryDay {
@@ -318,6 +328,18 @@ export interface BudgetCoachInput {
   settlementSummary: BudgetCoachSettlement[]
   hasItinerary: boolean
   hasExpenses: boolean
+  // Phase 6 — optional, high-level route summary (present only when the user has
+  // calculated day routes). The coach works fine without it.
+  routeSummary?: BudgetCoachRouteSummary
+}
+
+/** High-level, aggregate route info safe to share with the AI coach. */
+export interface BudgetCoachRouteSummary {
+  daysWithRoutes: number
+  totalDistanceKm: number
+  totalTravelMinutes: number
+  busiestDayNumber: number | null
+  busiestDayTravelMinutes: number
 }
 
 /** Structured advice returned to the client. */
@@ -341,4 +363,68 @@ export interface BudgetCoachResponse {
   isMock: boolean
   provider: 'anthropic' | 'mock'
   model: string
+}
+
+// ── Google Maps planning (Phase 6) ─────────────────────────────────────────
+//
+// Maps features are optional and gated. All Google calls go through server API
+// routes so the API key stays server-side. If the feature flag is off or no key
+// is configured, the UI degrades to manual location entry and "Setup required"
+// states — the core itinerary never depends on Google Maps. We persist only the
+// small set of place fields we need on an Activity, never raw Google responses.
+
+export type TravelMode = 'driving' | 'walking' | 'transit'
+
+/** Whether maps features are usable in the current environment. */
+export interface MapsStatus {
+  featureEnabled: boolean
+  configured: boolean
+  available: boolean
+}
+
+/** A single place returned by text search (trimmed to the fields we store/use). */
+export interface PlaceSearchResult {
+  placeId: string
+  name: string
+  address: string
+  rating?: number
+  userRatingsTotal?: number
+  priceLevel?: number
+  lat: number
+  lng: number
+}
+
+/** One ordered leg between two routed activities. */
+export interface RouteLeg {
+  originActivityId: string
+  destinationActivityId: string
+  originName: string
+  destinationName: string
+  travelMode: TravelMode
+  distanceText: string
+  durationText: string
+  distanceMeters: number
+  durationSeconds: number
+  /** False when Google could not return a route for this leg (e.g. no transit). */
+  ok: boolean
+}
+
+/** Computed, in-memory route plan for a single day (never persisted). */
+export interface DayRouteSummary {
+  dayId: string
+  travelMode: TravelMode
+  legs: RouteLeg[]
+  totalDistanceText: string
+  totalDurationText: string
+  totalDistanceMeters: number
+  totalDurationSeconds: number
+  warnings: string[]
+}
+
+/** Request body for POST /api/maps/route. */
+export interface RouteRequestPoint {
+  activityId: string
+  name: string
+  lat: number
+  lng: number
 }

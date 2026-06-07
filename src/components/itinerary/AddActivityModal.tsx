@@ -5,6 +5,8 @@ import { AlertTriangle } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
+import PlacePicker, { type SelectedPlace } from '@/components/maps/PlacePicker'
+import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import { activityCategoryIcon } from '@/lib/utils'
 import type { ActivityType, ActivityCategory, BookingStatus, Activity } from '@/types'
 
@@ -69,9 +71,11 @@ export default function AddActivityModal({
   editActivity,
   existingActivities = [],
 }: AddActivityModalProps) {
+  const { status: mapsStatus } = useMapsStatus()
   const [category, setCategory] = useState<ActivityCategory>('sightseeing')
   const [title, setTitle] = useState('')
   const [locationName, setLocationName] = useState('')
+  const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [estimatedCost, setEstimatedCost] = useState('')
@@ -86,6 +90,21 @@ export default function AddActivityModal({
       setCategory(deriveCategory(editActivity))
       setTitle(editActivity.title)
       setLocationName(editActivity.locationName ?? '')
+      // Restore a previously-selected Google place, if any.
+      if (editActivity.placeId && editActivity.lat != null && editActivity.lng != null) {
+        setSelectedPlace({
+          placeId: editActivity.placeId,
+          placeName: editActivity.placeName ?? editActivity.locationName ?? editActivity.title,
+          placeAddress: editActivity.placeAddress ?? '',
+          placeRating: editActivity.placeRating,
+          placeUserRatingsTotal: editActivity.placeUserRatingsTotal,
+          priceLevel: editActivity.priceLevel,
+          lat: editActivity.lat,
+          lng: editActivity.lng,
+        })
+      } else {
+        setSelectedPlace(null)
+      }
       setStartTime(editActivity.startTime ?? editActivity.time ?? '')
       setEndTime(editActivity.endTime ?? '')
       setEstimatedCost(String(editActivity.estimatedCost ?? editActivity.cost ?? ''))
@@ -95,6 +114,7 @@ export default function AddActivityModal({
       setCategory('sightseeing')
       setTitle('')
       setLocationName('')
+      setSelectedPlace(null)
       setStartTime('')
       setEndTime('')
       setEstimatedCost('')
@@ -131,6 +151,10 @@ export default function AddActivityModal({
     }
     setSaving(true)
     const cost = parseFloat(estimatedCost) || 0
+    // A selected Google place drives the displayed location; otherwise manual text.
+    const resolvedLocation = selectedPlace
+      ? selectedPlace.placeName
+      : locationName.trim() || undefined
     const activityData: Omit<Activity, 'id'> = {
       type: CATEGORY_TO_TYPE[category],
       category,
@@ -140,11 +164,20 @@ export default function AddActivityModal({
       endTime: endTime || undefined,
       cost,
       estimatedCost: cost,
-      locationName: locationName.trim() || undefined,
+      locationName: resolvedLocation,
       bookingStatus,
       notes: notes.trim(),
       confirmed: bookingStatus === 'completed',
       updatedAt: new Date().toISOString(),
+      // Phase 6 — place metadata (undefined values are pruned before saving).
+      placeId: selectedPlace?.placeId,
+      placeName: selectedPlace?.placeName,
+      placeAddress: selectedPlace?.placeAddress,
+      placeRating: selectedPlace?.placeRating,
+      placeUserRatingsTotal: selectedPlace?.placeUserRatingsTotal,
+      priceLevel: selectedPlace?.priceLevel,
+      lat: selectedPlace?.lat,
+      lng: selectedPlace?.lng,
     }
     await onSave(activityData)
     setSaving(false)
@@ -190,12 +223,14 @@ export default function AddActivityModal({
           autoFocus={!isEdit}
         />
 
-        {/* Location */}
-        <Input
-          label="Location (optional)"
-          placeholder="e.g. Colaba, Mumbai"
-          value={locationName}
-          onChange={(e) => setLocationName(e.target.value)}
+        {/* Location — Google place search when available, else manual entry */}
+        <PlacePicker
+          available={mapsStatus.available}
+          locationName={locationName}
+          onLocationNameChange={setLocationName}
+          selectedPlace={selectedPlace}
+          onSelectPlace={(place) => { setSelectedPlace(place); setLocationName(place.placeName) }}
+          onClearPlace={() => setSelectedPlace(null)}
         />
 
         {/* Times */}

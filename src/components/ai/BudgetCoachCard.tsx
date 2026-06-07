@@ -9,7 +9,7 @@ import {
 import { buildBudgetCoachInput } from '@/lib/ai/budgetCoach'
 import type {
   Trip, Expense, ItineraryDay, BudgetCoachResult, BudgetCoachResponse,
-  BudgetHealth, OverspendRisk,
+  BudgetHealth, OverspendRisk, BudgetCoachRouteSummary,
 } from '@/types'
 
 interface BudgetCoachCardProps {
@@ -18,6 +18,8 @@ interface BudgetCoachCardProps {
   days: ItineraryDay[]
   /** 'budget' shows everything; 'itinerary' leads with planned-vs-budget advice. */
   variant?: 'budget' | 'itinerary'
+  /** Optional high-level route summary to enrich the analysis (Phase 6). */
+  routeSummary?: BudgetCoachRouteSummary
 }
 
 const HEALTH_META: Record<BudgetHealth, { label: string; cls: string; bar: string }> = {
@@ -69,7 +71,7 @@ function ListBlock({
 }
 
 export default function BudgetCoachCard({
-  trip, expenses, days, variant = 'budget',
+  trip, expenses, days, variant = 'budget', routeSummary,
 }: BudgetCoachCardProps) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [result, setResult] = useState<BudgetCoachResult | null>(null)
@@ -83,7 +85,7 @@ export default function BudgetCoachCard({
     setStatus('loading')
     setErrorMsg('')
     try {
-      const input = buildBudgetCoachInput(trip, expenses, days)
+      const input = buildBudgetCoachInput(trip, expenses, days, new Date(), routeSummary)
       const res = await fetch('/api/ai/budget-coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

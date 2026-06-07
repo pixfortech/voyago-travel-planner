@@ -20,6 +20,7 @@ import type {
   BudgetCoachResult,
   BudgetHealth,
   OverspendRisk,
+  BudgetCoachRouteSummary,
 } from '@/types'
 import { formatCurrency, getDayCount } from '@/lib/utils'
 import {
@@ -55,7 +56,8 @@ export function buildBudgetCoachInput(
   trip: Trip,
   expenses: Expense[],
   days: ItineraryDay[],
-  now: Date = new Date()
+  now: Date = new Date(),
+  routeSummary?: BudgetCoachRouteSummary
 ): BudgetCoachInput {
   const travellers = trip.travellers ?? []
   const travellerCount = Math.max(travellers.length, 1)
@@ -112,7 +114,7 @@ export function buildBudgetCoachInput(
     }))
   }
 
-  return {
+  const input: BudgetCoachInput = {
     tripName: trip.name,
     destination: trip.destination,
     tripType: trip.type,
@@ -149,6 +151,13 @@ export function buildBudgetCoachInput(
     hasItinerary: activityCount > 0,
     hasExpenses: expenses.length > 0,
   }
+
+  // Attach the optional high-level route summary when present.
+  if (routeSummary && routeSummary.daysWithRoutes > 0) {
+    input.routeSummary = routeSummary
+  }
+
+  return input
 }
 
 /**
@@ -312,6 +321,13 @@ export function mockBudgetCoachResult(input: BudgetCoachInput): BudgetCoachResul
     }
   } else if (!input.hasItinerary) {
     itinerarySuggestions.push('Add itinerary activities with estimated costs to compare your plan against the budget.')
+  }
+  // Route-aware tip when day routes have been calculated.
+  const route = input.routeSummary
+  if (route && route.totalTravelMinutes > 0) {
+    itinerarySuggestions.push(
+      `Across ${route.daysWithRoutes} planned day(s) you have about ${route.totalDistanceKm} km / ${route.totalTravelMinutes} min of travel${route.busiestDayNumber ? `, heaviest on Day ${route.busiestDayNumber} (${route.busiestDayTravelMinutes} min)` : ''}. Group nearby stops to cut transport time and cost.`
+    )
   }
 
   const dailySpendAdvice =
