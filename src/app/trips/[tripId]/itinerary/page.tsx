@@ -4,18 +4,20 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { TrendingUp, TrendingDown } from 'lucide-react'
-import { getTrip, getItineraryDays, addActivity, deleteActivity, updateActivity } from '@/lib/firestore'
+import { getTrip, getItineraryDays, getExpenses, addActivity, deleteActivity, updateActivity } from '@/lib/firestore'
 import { formatCurrency } from '@/lib/utils'
 import AppShell from '@/components/layout/AppShell'
 import DaySection from '@/components/itinerary/DaySection'
 import AddActivityModal from '@/components/itinerary/AddActivityModal'
-import type { Trip, ItineraryDay, Activity } from '@/types'
+import BudgetCoachCard from '@/components/ai/BudgetCoachCard'
+import type { Trip, ItineraryDay, Activity, Expense } from '@/types'
 
 export default function ItineraryPage() {
   const { tripId } = useParams<{ tripId: string }>()
   const router = useRouter()
   const [trip, setTrip] = useState<Trip | null>(null)
   const [days, setDays] = useState<ItineraryDay[]>([])
+  const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
 
   const [addingDayId, setAddingDayId] = useState<string | null>(null)
@@ -23,12 +25,15 @@ export default function ItineraryPage() {
 
   useEffect(() => {
     if (!tripId) return
-    Promise.all([getTrip(tripId), getItineraryDays(tripId)]).then(([t, d]) => {
-      if (!t) { router.push('/dashboard'); return }
-      setTrip(t)
-      setDays(d)
-      setLoading(false)
-    })
+    Promise.all([getTrip(tripId), getItineraryDays(tripId), getExpenses(tripId)]).then(
+      ([t, d, e]) => {
+        if (!t) { router.push('/dashboard'); return }
+        setTrip(t)
+        setDays(d)
+        setExpenses(e)
+        setLoading(false)
+      }
+    )
   }, [tripId, router])
 
   function handleAddActivityClick(dayId: string) {
@@ -196,6 +201,13 @@ export default function ItineraryPage() {
               onToggleConfirm={handleToggleConfirm}
             />
           ))
+        )}
+
+        {/* AI Budget Coach — planned itinerary vs budget */}
+        {trip && totalEstimated > 0 && (
+          <div className="pt-1">
+            <BudgetCoachCard trip={trip} expenses={expenses} days={days} variant="itinerary" />
+          </div>
         )}
       </motion.div>
 

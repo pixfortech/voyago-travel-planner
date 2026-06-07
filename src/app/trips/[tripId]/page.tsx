@@ -86,6 +86,8 @@ export default function TripOverviewPage() {
   const perHeadSpent = getPerHeadActualCost(expenses, travellerCount)
 
   const isOverBudget = trip.budget > 0 && spent > trip.budget
+  // Whether the AI Budget Coach has enough signal to give useful advice.
+  const hasCoachData = trip.budget > 0 || expenses.length > 0
   const barColor = isOverBudget
     ? 'bg-red-500'
     : usagePct > 80
@@ -288,18 +290,22 @@ export default function TripOverviewPage() {
                 </div>
               </Link>
 
-              <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative overflow-hidden opacity-70">
-                <div className="absolute top-2.5 right-2.5">
-                  <span className="inline-flex items-center gap-1 bg-primary-100 text-primary-600 text-[10px] font-black px-2 py-0.5 rounded-full">
-                    <Lock size={8} /> Soon
-                  </span>
+              <Link href={`/trips/${tripId}/budget#ai-coach`}>
+                <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-violet-200 hover:-translate-y-0.5 transition-all cursor-pointer relative overflow-hidden">
+                  <div className="absolute top-2.5 right-2.5">
+                    <span className="inline-flex items-center gap-1 bg-violet-100 text-violet-600 text-[10px] font-black px-2 py-0.5 rounded-full">
+                      Beta
+                    </span>
+                  </div>
+                  <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-500 rounded-xl flex items-center justify-center mb-3 shadow-sm shadow-violet-500/20">
+                    <Sparkles size={20} className="text-white" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-sm">AI Budget Coach</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {hasCoachData ? 'Smart budget advice' : 'Add data to unlock'}
+                  </p>
                 </div>
-                <div className="w-10 h-10 bg-gradient-to-br from-violet-400 to-purple-500 rounded-xl flex items-center justify-center mb-3">
-                  <Sparkles size={20} className="text-white" />
-                </div>
-                <p className="font-bold text-gray-500 text-sm">AI Planner</p>
-                <p className="text-xs text-gray-400 mt-0.5">Smart suggestions</p>
-              </div>
+              </Link>
 
               <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative overflow-hidden opacity-70">
                 <div className="absolute top-2.5 right-2.5">

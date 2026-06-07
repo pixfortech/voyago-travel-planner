@@ -301,12 +301,60 @@ dev server.
 
 ---
 
-## AI provider (optional for local dev)
+## AI provider & AI Budget Coach (Phase 5)
 
-Voyago's AI features run through a server-only provider. The template sets
-`AI_PROVIDER=mock` so nothing breaks locally — the app uses a clearly-labelled
-mock response. Add a real `ANTHROPIC_API_KEY` in the deployment environment when
-AI generation ships.
+Voyago's AI features run through a **server-only** provider, so the
+`ANTHROPIC_API_KEY` is never exposed to the browser. The first live feature is
+the **AI Budget Coach**, which analyses a trip's budget, itinerary cost
+estimates, and actual expenses and returns practical, India-first advice for
+staying on budget.
+
+### How it decides which provider to use
+
+The resolver in `src/lib/ai/provider.ts` picks the provider from two env vars:
+
+| `AI_PROVIDER` | `ANTHROPIC_API_KEY` | Result                                            |
+| ------------- | ------------------- | ------------------------------------------------- |
+| `mock`        | (any)               | Development **mock** — labelled, no key needed     |
+| `anthropic`   | set                 | Real Anthropic Claude                              |
+| `anthropic`   | missing             | Error at request time (mis-config)                 |
+| unset / auto  | set                 | Real Anthropic Claude                              |
+| unset / auto  | missing             | Development **mock**                               |
+
+### Local testing (no key required)
+
+The template sets `AI_PROVIDER=mock`, so the Budget Coach works out of the box
+locally. In mock mode it returns **structured advice derived from your real trip
+numbers** (health, risk, daily/per-head advice, warnings) — useful for testing —
+but every response is flagged `isMock: true` and the UI shows a clear
+**"Development mock response"** note. Mock output is never presented as real AI.
+
+```bash
+# .env.local — works with no real key
+AI_PROVIDER=mock
+ANTHROPIC_API_KEY=
+```
+
+### Enabling real AI for deployment
+
+Add a real key in your deployment environment (Vercel/host project settings —
+**not** committed to git) and either leave `AI_PROVIDER` unset (auto-detects the
+key) or set it explicitly:
+
+```bash
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...        # server-only secret; never prefix with NEXT_PUBLIC
+```
+
+The Budget Coach calls `POST /api/ai/budget-coach` with a **privacy-safe**
+payload built from existing trip data — aggregate numbers and traveller display
+names only. It never sends emails, Firebase uids, auth tokens, expense ids,
+payer ids, or free-text notes. AI advice is approximate guidance and should be
+reviewed; it is not financial advice.
+
+You can confirm which provider is active via `GET /api/ai/health` (reports
+`provider`, `usingMockProvider`, and `aiKeyConfigured` without ever exposing the
+key value).
 
 ---
 

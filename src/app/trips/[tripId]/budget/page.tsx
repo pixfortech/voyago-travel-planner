@@ -7,6 +7,7 @@ import { Plus } from 'lucide-react'
 import {
   getTrip,
   getExpenses,
+  getItineraryDays,
   addExpense,
   deleteExpense,
   updateExpense,
@@ -16,25 +17,30 @@ import BudgetOverview from '@/components/budget/BudgetOverview'
 import TravellerLedger from '@/components/budget/TravellerLedger'
 import ExpenseCard from '@/components/budget/ExpenseCard'
 import AddExpenseModal from '@/components/budget/AddExpenseModal'
+import BudgetCoachCard from '@/components/ai/BudgetCoachCard'
 import Button from '@/components/ui/Button'
-import type { Trip, Expense } from '@/types'
+import type { Trip, Expense, ItineraryDay } from '@/types'
 
 export default function BudgetPage() {
   const { tripId } = useParams<{ tripId: string }>()
   const router = useRouter()
   const [trip, setTrip] = useState<Trip | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
+  const [days, setDays] = useState<ItineraryDay[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
 
   useEffect(() => {
     if (!tripId) return
-    Promise.all([getTrip(tripId), getExpenses(tripId)]).then(([t, e]) => {
-      if (!t) { router.push('/dashboard'); return }
-      setTrip(t)
-      setExpenses(e)
-      setLoading(false)
-    })
+    Promise.all([getTrip(tripId), getExpenses(tripId), getItineraryDays(tripId)]).then(
+      ([t, e, d]) => {
+        if (!t) { router.push('/dashboard'); return }
+        setTrip(t)
+        setExpenses(e)
+        setDays(d)
+        setLoading(false)
+      }
+    )
   }, [tripId, router])
 
   async function handleAddExpense(data: Omit<Expense, 'id' | 'tripId' | 'createdAt'>) {
@@ -99,6 +105,11 @@ export default function BudgetPage() {
           expenses={expenses}
           travellerCount={travellerCount}
         />
+
+        {/* ── AI Budget Coach ── */}
+        <div id="ai-coach" className="scroll-mt-24">
+          <BudgetCoachCard trip={trip} expenses={expenses} days={days} variant="budget" />
+        </div>
 
         {/* ── Traveller ledger (only when tracked expenses exist) ── */}
         {showLedger && (

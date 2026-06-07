@@ -243,3 +243,102 @@ export interface Share {
   createdAt: string
   updatedAt: string
 }
+
+// ── AI Budget Coach (Phase 5) ─────────────────────────────────────────────
+//
+// The Budget Coach analyses a trip's budget, itinerary estimates, and actual
+// expenses, then returns practical, India-first advice to help travellers stay
+// on budget. The analysis INPUT is built entirely from existing trip data and is
+// privacy-safe: it carries only aggregate numbers and user-entered display names
+// — never emails, Firebase uids, auth tokens, or hidden profile data.
+
+export type BudgetHealth = 'excellent' | 'good' | 'caution' | 'risky' | 'over_budget'
+export type OverspendRisk = 'low' | 'medium' | 'high' | 'critical'
+
+export interface BudgetCoachDayEstimate {
+  dayNumber: number
+  date: string
+  estimated: number
+}
+
+export interface BudgetCoachCategoryTotal {
+  category: ExpenseCategory
+  total: number
+}
+
+export interface BudgetCoachVendorTotal {
+  vendorType: VendorType
+  total: number
+}
+
+export interface BudgetCoachDaySpend {
+  date: string
+  total: number
+}
+
+// High-level settlement line — display names only, no ids or emails.
+export interface BudgetCoachSettlement {
+  fromName: string
+  toName: string
+  amount: number
+}
+
+/**
+ * Privacy-safe analysis payload sent to the AI Budget Coach endpoint. Built on
+ * the client from data the owner already has; the server re-validates its shape.
+ * Contains NO emails, uids, tokens, or hidden profile data.
+ */
+export interface BudgetCoachInput {
+  tripName: string
+  destination: string
+  tripType: TripType
+  currency: string
+  startDate: string
+  endDate: string
+  totalDays: number
+  daysElapsed: number
+  daysLeft: number
+  tripStatus: 'upcoming' | 'in_progress' | 'completed'
+  travellerCount: number
+  budget: number
+  totalSpent: number
+  remaining: number
+  perHeadBudget: number
+  perHeadSpent: number
+  averageDailySpend: number
+  suggestedDailyRemaining: number
+  itineraryEstimatedTotal: number
+  itineraryPerHead: number
+  estimatedPerDay: BudgetCoachDayEstimate[]
+  categoryBreakdown: BudgetCoachCategoryTotal[]
+  vendorBreakdown: BudgetCoachVendorTotal[]
+  dayWiseSpend: BudgetCoachDaySpend[]
+  expenseCount: number
+  activityCount: number
+  settlementSummary: BudgetCoachSettlement[]
+  hasItinerary: boolean
+  hasExpenses: boolean
+}
+
+/** Structured advice returned to the client. */
+export interface BudgetCoachResult {
+  summary: string
+  budgetHealth: BudgetHealth
+  overspendRisk: OverspendRisk
+  keyFindings: string[]
+  recommendedActions: string[]
+  categoryWarnings: string[]
+  itinerarySuggestions: string[]
+  dailySpendAdvice: string
+  perHeadAdvice: string
+  nextBestSteps: string[]
+  dataGaps: string[]
+}
+
+/** API response envelope for POST /api/ai/budget-coach. */
+export interface BudgetCoachResponse {
+  result: BudgetCoachResult
+  isMock: boolean
+  provider: 'anthropic' | 'mock'
+  model: string
+}
