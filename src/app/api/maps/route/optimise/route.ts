@@ -5,12 +5,15 @@
  *   points: OptimiseRoutePoint[],  // id, name, lat, lng
  *   travelMode: TravelMode,
  *   mode: RouteOptimiseMode,       // 'fastest' | 'shortest' | 'balanced'
+ *   keepFirstFixed?: boolean,      // pin the first stop as the day-start (default true)
+ *   keepLastFixed?: boolean,       // pin the last stop as the day-end (default false)
  * }
  * Returns: OptimiseRouteResult
  *
- * Uses nearest-neighbour heuristic (Haversine) to find a good visit order then
- * calls Google Routes API for exact road distance + duration of the optimised
- * sequence. Returns 503 when Maps is unavailable. User-triggered only.
+ * Orders stops by REAL road cost: a traffic-aware Compute Route Matrix solved
+ * with a TSP heuristic, then a Compute Routes call for the exact polyline +
+ * totals. Straight-line Haversine is used only as a fallback. Returns 503 when
+ * Maps is unavailable. User-triggered only.
  */
 
 import { NextResponse } from 'next/server'
@@ -49,6 +52,8 @@ export async function POST(request: Request) {
     points?: unknown
     travelMode?: unknown
     mode?: unknown
+    keepFirstFixed?: unknown
+    keepLastFixed?: unknown
   } | null
 
   const travelMode: TravelMode = TRAVEL_MODES.includes(b?.travelMode as TravelMode)
@@ -58,6 +63,11 @@ export async function POST(request: Request) {
   const mode: RouteOptimiseMode = OPTIMISE_MODES.includes(b?.mode as RouteOptimiseMode)
     ? (b!.mode as RouteOptimiseMode)
     : 'fastest'
+
+  // Default: keep the first stop fixed (planning from a chosen start), let the
+  // optimiser choose the best end. Both are caller-overridable booleans.
+  const keepFirstFixed = typeof b?.keepFirstFixed === 'boolean' ? b.keepFirstFixed : true
+  const keepLastFixed = typeof b?.keepLastFixed === 'boolean' ? b.keepLastFixed : false
 
   if (!Array.isArray(b?.points)) {
     return NextResponse.json({ error: 'invalid_input' }, { status: 400 })
@@ -84,7 +94,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await computeOptimisedRoute(points, travelMode, mode)
+    const result = await computeOptimisedRoute(points, travelMode, mode, {
+      keepFirstFixed,
+      keepLastFixed,
+    })
     return NextResponse.json(result)
   } catch (err) {
     if (process.env.NODE_ENV !== 'production') {

@@ -7,6 +7,7 @@ import {
   MapPin, Navigation, Camera, Calendar, Play, Pause, RotateCcw,
   Zap, Clock, ChevronLeft, ChevronRight, Map, Info,
   ArrowUp, ArrowDown, Loader2, AlertTriangle, TrendingUp, CheckCircle2,
+  Route, Gauge,
 } from 'lucide-react'
 import { getTrip, getItineraryDays, getLocationPoints, getMemories } from '@/lib/firestore'
 import { buildPlaybackPoints, groupPlaybackByDay } from '@/lib/location/playback'
@@ -16,7 +17,7 @@ import RouteGoogleMap, { type MapRenderStatus } from '@/components/maps/RouteGoo
 import { isBrowserMapsConfigured, getLoaderState } from '@/lib/maps/mapsLoader'
 import type {
   Trip, ItineraryDay, TripLocationPoint, TripMemory,
-  PlaybackPoint, PlaybackPointType, OptimiseRouteResult,
+  PlaybackPoint, PlaybackPointType, OptimiseRouteResult, RouteOptimiseMode,
 } from '@/types'
 
 // ── constants ──────────────────────────────────────────────────────────────
@@ -350,6 +351,10 @@ export default function PlaybackPage() {
   const [optimiseError, setOptimiseError] = useState<string | null>(null)
   const [mapsAvailable, setMapsAvailable] = useState(true)
   const [showCoach, setShowCoach] = useState(true)
+  // Optimiser objective + endpoint pinning (persist across day changes).
+  const [optimiseMode, setOptimiseMode] = useState<RouteOptimiseMode>('fastest')
+  const [keepFirstFixed, setKeepFirstFixed] = useState(true)
+  const [keepLastFixed, setKeepLastFixed] = useState(false)
 
   // ── Google Maps canvas (Phase 7E) ─────────────────────────────────────
   // Derived client-side only (after hydration) so SSR never tries to mount the
@@ -456,6 +461,17 @@ export default function PlaybackPage() {
   const activePolyline = polylineIsCurrent ? optimiseResult!.routePolyline! : null
   const showGoogleMap = browserMapsConfigured && mapStatus !== 'error'
 
+  // Whether the suggested optimised order is already the order on screen. While a
+  // result exists but is NOT applied, the timeline/map keep the current order and
+  // the optimiser card shows a clearly-labelled preview of the suggestion.
+  const optimisedApplied = useMemo(
+    () =>
+      !!optimisedIndices &&
+      optimisedIndices.length === customOrder.length &&
+      optimisedIndices.every((v, i) => v === customOrder[i]),
+    [optimisedIndices, customOrder],
+  )
+
   const coachHints = useMemo(
     () => buildCoachHints(displayPoints, manualDayDistance.totalKm, optimiseResult),
     [displayPoints, manualDayDistance.totalKm, optimiseResult],
@@ -558,7 +574,7 @@ export default function PlaybackPage() {
   }
 
   async function handleOptimise() {
-    if (dayPoints.length < 2 || optimising) return
+    if (dayPoints.length < 3 || optimising) return
     setOptimising(true)
     setOptimiseError(null)
 
@@ -566,7 +582,9 @@ export default function PlaybackPage() {
       const body = {
         points: dayPoints.map((p) => ({ id: p.id, name: p.label, lat: p.latitude, lng: p.longitude })),
         travelMode: 'driving',
-        mode: 'fastest',
+        mode: optimiseMode,
+        keepFirstFixed,
+        keepLastFixed,
       }
       const res = await fetch('/api/maps/route/optimise', {
         method: 'POST',
@@ -589,6 +607,15 @@ export default function PlaybackPage() {
         .map((id) => idToIdx[id])
         .filter((i): i is number => i !== undefined)
       setOptimisedIndices(indices)
+
+      if (process.env.NODE_ENV === 'development') {
+        const idToName: Record<string, string> = {}
+        dayPoints.forEach((p) => { idToName[p.id] = p.label })
+        console.log('[Voyago Playback] optimise method:', data.optimisationMethod,
+          '· mode:', data.mode, '· traffic:', data.trafficAware)
+        console.log('[Voyago Playback] original order:', data.originalOrder.map((id) => idToName[id]))
+        console.log('[Voyago Playback] optimised order:', data.optimisedOrder.map((id) => idToName[id]))
+      }
     } catch (err) {
       setOptimiseError(err instanceof Error ? err.message : 'Optimisation failed.')
     } finally {
@@ -883,7 +910,60 @@ export default function PlaybackPage() {
                   )}
                 </div>
 
-                {/* Distance comparison */}
+                {/* Objective (mode) selector */}
+                <div className="flex items-center gap-1 bg-gray-50 rounded-xl p-1">
+                  {(['fastest', 'shortest', 'balanced'] as RouteOptimiseMode[]).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setOptimiseMode(m)}
+                      disabled={optimising}
+                      className={`flex-1 capitalize text-[11px] font-bold py-1.5 rounded-lg transition-colors disabled:opacity-50 ${
+                        optimiseMode === m
+                          ? 'bg-white text-primary-700 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                      title={
+                        m === 'fastest'
+                          ? 'Minimise driving time (live traffic)'
+                          : m === 'shortest'
+                            ? 'Minimise driving distance'
+                            : 'Balance time and distance'
+                      }
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Endpoint pinning */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setKeepFirstFixed((v) => !v)}
+                    disabled={optimising}
+                    className={`flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors disabled:opacity-50 ${
+                      keepFirstFixed
+                        ? 'bg-primary-50 border-primary-200 text-primary-700'
+                        : 'bg-white border-gray-200 text-gray-400'
+                    }`}
+                  >
+                    <MapPin size={10} />
+                    Keep first fixed
+                  </button>
+                  <button
+                    onClick={() => setKeepLastFixed((v) => !v)}
+                    disabled={optimising}
+                    className={`flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors disabled:opacity-50 ${
+                      keepLastFixed
+                        ? 'bg-primary-50 border-primary-200 text-primary-700'
+                        : 'bg-white border-gray-200 text-gray-400'
+                    }`}
+                  >
+                    <Navigation size={10} />
+                    Keep last fixed
+                  </button>
+                </div>
+
+                {/* Straight-line comparison (instant, no API) */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-gray-500">Original order</span>
@@ -902,29 +982,94 @@ export default function PlaybackPage() {
                       </span>
                     </div>
                   )}
-
-                  {optimiseResult && (
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-primary-600 font-medium">Optimised order</span>
-                      <div className="text-right">
-                        <span className="font-semibold text-primary-700 tabular-nums">
-                          ≈ {(optimiseResult.optimisedHaversineMeters / 1000).toFixed(1)} km
-                          <span className="text-primary-400 font-normal ml-1">straight-line</span>
-                        </span>
-                        {optimiseResult.optimisedRouteDurationSeconds > 0 && (
-                          <div className="text-[11px] text-primary-500">
-                            {fmtMeters(optimiseResult.optimisedRouteDistanceMeters)} road ·{' '}
-                            {fmtSeconds(optimiseResult.optimisedRouteDurationSeconds)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
+
+                {/* Road before/after (from Google Routes) */}
+                {optimiseResult && (
+                  <div className="rounded-xl bg-gray-50 p-3 space-y-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="flex items-center gap-1 text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full">
+                        <Route size={10} />
+                        {optimiseResult.optimisationMethod === 'route_matrix_tsp'
+                          ? 'Real road order'
+                          : optimiseResult.optimisationMethod === 'routes_optimize_waypoints'
+                            ? 'Road order'
+                            : 'Straight-line estimate'}
+                      </span>
+                      <span className="text-[10px] font-bold text-gray-500 bg-white px-2 py-0.5 rounded-full capitalize">
+                        {optimiseResult.mode}
+                      </span>
+                      {optimiseResult.trafficAware && (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+                          <Gauge size={10} />
+                          live traffic
+                        </span>
+                      )}
+                    </div>
+
+                    {optimiseResult.originalRouteDurationSeconds > 0 && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-gray-500">Original road route</span>
+                        <span className="font-semibold text-gray-700 tabular-nums">
+                          {fmtMeters(optimiseResult.originalRouteDistanceMeters)} ·{' '}
+                          {fmtSeconds(optimiseResult.originalRouteDurationSeconds)}
+                        </span>
+                      </div>
+                    )}
+
+                    {optimiseResult.optimisedRouteDurationSeconds > 0 && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-primary-600 font-medium">Optimised road route</span>
+                        <span className="font-bold text-primary-700 tabular-nums">
+                          {fmtMeters(optimiseResult.optimisedRouteDistanceMeters)} ·{' '}
+                          {fmtSeconds(optimiseResult.optimisedRouteDurationSeconds)}
+                        </span>
+                      </div>
+                    )}
+
+                    {(optimiseResult.distanceSavedMeters > 0 || optimiseResult.durationSavedSeconds > 0) ? (
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-200">
+                        <span className="text-green-700 font-bold">You save</span>
+                        <span className="font-bold text-green-700 tabular-nums">
+                          {optimiseResult.durationSavedSeconds > 0 && fmtSeconds(optimiseResult.durationSavedSeconds)}
+                          {optimiseResult.durationSavedSeconds > 0 && optimiseResult.distanceSavedMeters > 0 && ' · '}
+                          {optimiseResult.distanceSavedMeters > 0 && fmtMeters(optimiseResult.distanceSavedMeters)}
+                        </span>
+                      </div>
+                    ) : optimiseResult.originalRouteDurationSeconds > 0 ? (
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-200">
+                        <span className="text-gray-500 font-medium">Already optimal</span>
+                        <span className="text-gray-400">your order is best</span>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* Preview of the suggested order (before Apply) */}
+                {optimisedIndices && !optimisedApplied && (
+                  <div className="rounded-xl border border-dashed border-primary-200 bg-primary-50/40 p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Info size={11} className="text-primary-500" />
+                      <p className="text-[11px] font-bold text-primary-700">
+                        Suggested order — preview (not applied yet)
+                      </p>
+                    </div>
+                    <ol className="space-y-0.5">
+                      {optimisedIndices.map((idx, pos) => (
+                        <li key={dayPoints[idx]?.id ?? pos} className="flex items-center gap-2 text-[11px] text-gray-600">
+                          <span className="w-4 h-4 rounded-full bg-primary-500 text-white text-[9px] font-bold flex items-center justify-center flex-shrink-0">
+                            {pos + 1}
+                          </span>
+                          <span className="truncate">{dayPoints[idx]?.label ?? '—'}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
 
                 {/* Action buttons */}
                 <div className="flex flex-wrap gap-2">
-                  {optimisedIndices && (
+                  {optimisedIndices && !optimisedApplied && (
                     <button
                       onClick={handleApplyOptimised}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold transition-colors"
@@ -933,11 +1078,23 @@ export default function PlaybackPage() {
                       Apply optimised order
                     </button>
                   )}
+                  {optimisedApplied && (
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-50 text-green-700 text-xs font-bold">
+                      <CheckCircle2 size={12} />
+                      Optimised order applied
+                    </span>
+                  )}
 
                   <button
                     onClick={handleOptimise}
-                    disabled={optimising || !mapsAvailable || dayPoints.length < 2}
-                    title={!mapsAvailable ? 'Google Maps not configured — set GOOGLE_MAPS_API_KEY' : undefined}
+                    disabled={optimising || !mapsAvailable || dayPoints.length < 3}
+                    title={
+                      !mapsAvailable
+                        ? 'Google Maps not configured — set GOOGLE_MAPS_API_KEY'
+                        : dayPoints.length < 3
+                          ? 'Add at least 3 stops to optimise'
+                          : undefined
+                    }
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-400 text-white text-xs font-bold transition-colors"
                   >
                     {optimising ? (
@@ -952,10 +1109,36 @@ export default function PlaybackPage() {
                   </button>
                 </div>
 
+                {dayPoints.length < 3 && (
+                  <p className="text-[11px] text-gray-400">
+                    Add at least 3 stops to this day to optimise the visiting order.
+                  </p>
+                )}
+
                 {optimiseError && (
                   <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">
                     <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
                     {optimiseError}
+                  </div>
+                )}
+
+                {/* Dev-only optimisation debug */}
+                {process.env.NODE_ENV === 'development' && optimiseResult && (
+                  <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 space-y-1">
+                    <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
+                      dev · optimisation debug
+                    </p>
+                    <p className="text-[10px] text-amber-700 font-mono break-words">
+                      method={optimiseResult.optimisationMethod} · mode={optimiseResult.mode} ·
+                      traffic={String(optimiseResult.trafficAware)} ·
+                      keepFirst={String(optimiseResult.keepFirstFixed)} ·
+                      keepLast={String(optimiseResult.keepLastFixed)}
+                    </p>
+                    <p className="text-[10px] text-amber-700 font-mono break-words">
+                      optimised: {optimiseResult.optimisedOrder
+                        .map((id) => dayPoints.find((p) => p.id === id)?.label ?? id)
+                        .join(' → ')}
+                    </p>
                   </div>
                 )}
               </div>

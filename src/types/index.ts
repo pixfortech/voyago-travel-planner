@@ -552,12 +552,27 @@ export interface PlaybackPoint {
 
 // ── Route Optimiser (Phase 7D) ────────────────────────────────────────────
 //
-// Smart AI Route Optimiser uses a nearest-neighbour heuristic (Haversine) for
-// ordering then calls Google Routes API for exact road distances and durations.
-// All optimisation calls are user-triggered — never automatic. Returns 503 when
-// Maps is not configured so the UI degrades to Haversine-only mode.
+// Smart AI Route Optimiser orders stops by REAL road cost (distance/time) using
+// Google Routes API. The primary method builds a traffic-aware road-cost matrix
+// (Compute Route Matrix) and solves the visit order with a TSP heuristic
+// (nearest-neighbour + 2-opt); straight-line Haversine is used only as a no-key
+// / API-failure fallback. The exact road polyline + totals come from a single
+// Compute Routes call for the chosen order. All optimisation calls are
+// user-triggered — never automatic. Returns 503 when Maps is not configured.
 
 export type RouteOptimiseMode = 'fastest' | 'shortest' | 'balanced'
+
+/**
+ * How the optimised visit order was derived. Surfaced in dev debug + a UI badge
+ * so it is always clear whether the order is real-road-aware or an estimate.
+ *   • route_matrix_tsp        — Routes API road-cost matrix + TSP (best)
+ *   • routes_optimize_waypoints — Routes API optimizeWaypointOrder (road-aware)
+ *   • haversine_fallback      — straight-line estimate (no key / API failure)
+ */
+export type RouteOptimisationMethod =
+  | 'route_matrix_tsp'
+  | 'routes_optimize_waypoints'
+  | 'haversine_fallback'
 
 /** A single point to include in an optimisation request. */
 export interface OptimiseRoutePoint {
@@ -571,18 +586,34 @@ export interface OptimiseRoutePoint {
 export interface OptimiseRouteResult {
   mode: RouteOptimiseMode
   travelMode: TravelMode
+  /** How the optimised order was computed (drives the UI method badge). */
+  optimisationMethod: RouteOptimisationMethod
+  /** Whether real-time traffic was factored into road costs (DRIVE only). */
+  trafficAware: boolean
+  /** Whether the first point was held fixed as the start of the day. */
+  keepFirstFixed: boolean
+  /** Whether the last point was held fixed as the end of the day. */
+  keepLastFixed: boolean
   /** Point IDs in the caller-supplied (original) order. */
   originalOrder: string[]
-  /** Point IDs in the optimised order (nearest-neighbour from start). */
+  /** Point IDs in the optimised road order. */
   optimisedOrder: string[]
   /** Straight-line Haversine distance for the original order (approx, metres). */
   originalHaversineMeters: number
   /** Straight-line Haversine distance for the optimised order (approx, metres). */
   optimisedHaversineMeters: number
+  /** Exact road distance for the ORIGINAL order (metres). 0 when unavailable. */
+  originalRouteDistanceMeters: number
+  /** Exact road travel time for the ORIGINAL order (seconds). 0 when unavailable. */
+  originalRouteDurationSeconds: number
   /** Exact road distance for the optimised order via Google Routes API (metres). */
   optimisedRouteDistanceMeters: number
   /** Exact road travel time for the optimised order via Google Routes API (seconds). */
   optimisedRouteDurationSeconds: number
+  /** Road distance saved vs the original order (metres; may be negative). */
+  distanceSavedMeters: number
+  /** Road travel time saved vs the original order (seconds; may be negative). */
+  durationSavedSeconds: number
   /**
    * Encoded polyline (Google's algorithm) of the exact road route for the
    * optimised order, when the Routes API returned one. Decoded client-side and

@@ -396,7 +396,8 @@ GOOGLE_MAPS_API_KEY=AIza...        # server-only; never returned to the client
 Enable these in Google Cloud Console for the project that owns the key:
 
 - **Places API (New)** — text place search (`places:searchText`)
-- **Routes API** — travel time/distance (`computeRoutes`); also used by the Route Optimiser (`/api/maps/route/optimise`)
+- **Routes API** — travel time/distance (`computeRoutes`) **and** the road-cost
+  matrix used by the Route Optimiser (`computeRouteMatrix`, `/api/maps/route/optimise`)
 
 (If you later add an interactive map, also enable the **Maps JavaScript API** and
 use the public `NEXT_PUBLIC_` key for it.)
@@ -515,33 +516,57 @@ Every point in the timeline has up/down arrow buttons (visible when playback is
 paused). Drag-free reordering works on any device. The SVG map and the
 straight-line Haversine distance update immediately after each move.
 
-### Google Routes API optimisation (user-triggered)
+### Road-aware optimisation (user-triggered)
 
 The **Optimise via Google Routes** button sends the day's points to
-`POST /api/maps/route/optimise`, which:
+`POST /api/maps/route/optimise`, which orders stops by **real road cost** — not
+straight-line distance:
 
-1. Builds a Haversine pairwise distance matrix.
-2. Runs a **nearest-neighbour greedy algorithm** (preserving the start point) to
-   find a short visit order.
-3. Calls `Google Routes API → computeRoutes` for the optimised sequence to get
-   the exact road distance and estimated travel time.
-4. Returns the optimised order (point IDs), Haversine approximations for both
-   original and optimised orders, and the exact Routes API figures.
+1. Builds a **traffic-aware road-cost matrix** with the Google Routes API
+   **Compute Route Matrix** (`distanceMatrix/v2:computeRouteMatrix`). Each cell is
+   the actual driving distance/time between two stops, using `TRAFFIC_AWARE`
+   (live current traffic) for driving — so one-way roads, terrain and mountain
+   switchbacks are respected.
+2. Solves the visit order with a **TSP heuristic** (nearest-neighbour
+   construction + **2-opt** local search) on the metric the chosen mode asks for:
+   - **Fastest** → minimise road **duration** (live traffic)
+   - **Shortest** → minimise road **distance**
+   - **Balanced** → minimise a normalised blend of both
+3. Pins the endpoints as requested — **Keep first fixed** (default on, your
+   chosen day-start) and **Keep last fixed** (optional, e.g. return to hotel).
+4. Calls `Google Routes API → computeRoutes` once for the optimised order to get
+   the exact road distance, travel time and the drawable road polyline.
 
-The button is disabled (labelled *setup required*) when Maps is not configured.
-**No API call is made automatically** — it is always user-triggered.
+> **Why not straight-line nearest-neighbour?** Haversine ignores the actual road
+> network. In hilly/curved-road places (e.g. Gangtok) two stops that are close
+> as the crow flies can be far apart by road, producing a zig-zag order. Ordering
+> by the real road-cost matrix follows the practical drive sequence instead.
+> Haversine is kept **only** as a fallback when the road matrix is unavailable
+> (no key, transit mode, or a transient API failure) — clearly labelled in the
+> result (`optimisationMethod: 'haversine_fallback'`).
+
+The button needs **at least 3 stops** and is disabled (labelled *setup required*)
+when Maps is not configured. **No API call is made automatically** — it is always
+user-triggered.
 
 ### Route comparison
 
-After optimisation the UI shows three rows:
+After optimisation the UI shows a real before/after:
 
-| Row | Distance type |
+| Row | What it shows |
 | --- | ------------- |
-| **Original order** | ≈ X km straight-line (Haversine) |
-| **Your order** (after manual reorder) | ≈ Y km straight-line (Haversine) |
-| **Optimised order** | ≈ Z km straight-line + exact road distance & time via Routes API |
+| **Original order** | ≈ X km straight-line (Haversine, instant) |
+| **Your order** (after manual reorder) | ≈ Y km straight-line (Haversine, instant) |
+| **Original road route** | exact road distance + time for the source order |
+| **Optimised road route** | exact road distance + time for the optimised order |
+| **You save** | road distance saved + time saved vs the original order |
 
-The *Apply optimised order* button reshuffles the timeline; *Revert to original*
+A method badge shows whether the order is *real road* or a *straight-line
+estimate*, the active mode, and a *live traffic* badge when traffic was used.
+
+Optimisation is **never applied automatically**. The suggested order is shown as
+a numbered **preview**; only the *Apply optimised order* button reshuffles the
+timeline and map (marker numbers always match the timeline). *Revert to original*
 returns it to the source order.
 
 ### AI Route Coach
@@ -557,9 +582,12 @@ and distance and surfaces up to three rule-based hints:
 
 ### Billing control
 
-The Route Optimiser makes exactly **one** Routes API call per user press of
-*Optimise via Google Routes*. No calls happen on page load, on day change, or on
-manual reorder. The endpoint is rate-limited to 10 requests per IP per minute.
+Each press of *Optimise via Google Routes* makes at most **two** Routes API
+calls: one **Compute Route Matrix** (for the road-cost ordering) and one
+**Compute Routes** (for the optimised polyline + exact totals). Both use tight
+field masks to request only the fields used. No calls happen on page load, on day
+change, or on manual reorder — straight-line figures update locally. The endpoint
+is rate-limited to 10 requests per IP per minute.
 
 ---
 

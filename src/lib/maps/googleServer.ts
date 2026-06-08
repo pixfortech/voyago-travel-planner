@@ -11,9 +11,13 @@
  *   2. NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (public — convenient for local dev)
  *
  * Google APIs used:
- *   • Places API (New)     — places:searchText  (text place search)
- *   • Google Routes API    — computeRoutes      (sequential leg distance/duration)
- *   • Google Routes API    — computeRoutes      (optimised order via nearest-neighbour)
+ *   • Places API (New)     — places:searchText      (text place search)
+ *   • Google Routes API    — computeRoutes          (sequential leg distance/duration)
+ *   • Google Routes API    — computeRouteMatrix     (traffic-aware road-cost matrix
+ *                                                    for the optimiser; replaces the
+ *                                                    old straight-line Haversine order)
+ *   • Google Routes API    — computeRoutes          (exact polyline + totals for the
+ *                                                    optimised order)
  */
 
 import 'server-only'
@@ -28,6 +32,7 @@ import type {
   OptimiseRoutePoint,
   OptimiseRouteResult,
   RouteOptimiseMode,
+  RouteOptimisationMethod,
 } from '@/types'
 
 export function getServerMapsKey(): string {
@@ -181,6 +186,7 @@ function parseDurationSeconds(dur?: string): number {
 async function fetchRoutesApiLegs(
   points: Array<{ lat: number; lng: number }>,
   travelMode: TravelMode,
+  opts: { trafficAware?: boolean } = {},
 ): Promise<RoutesApiResult> {
   const key = getServerMapsKey()
   if (points.length < 2) throw new Error('not_enough_points')
@@ -200,8 +206,10 @@ async function fetchRoutesApiLegs(
   }
 
   // routingPreference is only valid for DRIVE/TWO_WHEELER in the Routes API.
+  // TRAFFIC_AWARE (no departureTime) uses live current traffic so the optimised
+  // order reflects practical, real-world drive times.
   if (travelMode === 'driving') {
-    body.routingPreference = 'TRAFFIC_UNAWARE'
+    body.routingPreference = opts.trafficAware ? 'TRAFFIC_AWARE' : 'TRAFFIC_UNAWARE'
   }
 
   if (points.length > 2) {
@@ -316,55 +324,154 @@ export async function computeDayRoute(
   }
 }
 
-// ── Routes API — smart route optimiser (Phase 7D) ──────────────────────────
+// ── Routes API — road-cost matrix (Compute Route Matrix) ───────────────────
+
+interface RouteMatrixElement {
+  originIndex?: number
+  destinationIndex?: number
+  distanceMeters?: number
+  duration?: string
+  condition?: string
+}
+
+/** Square road-cost matrices (metres / seconds) between every pair of points. */
+interface RoadCostMatrix {
+  distance: number[][]
+  duration: number[][]
+}
 
 /**
- * Find an optimised visit order using a nearest-neighbour greedy algorithm
- * seeded with Haversine straight-line distances, then compute the exact road
- * distance and travel time for the optimised route via Google Routes API.
+ * Build a traffic-aware road-cost matrix between every pair of points using the
+ * Google Routes API Compute Route Matrix endpoint. Each cell is the real road
+ * distance/time of driving from i → j (not a straight line), so the optimiser
+ * respects one-way roads, terrain and mountain switchbacks.
  *
- * The starting point is always preserved so the user's day-start is respected.
- * Returns Haversine approximations for BOTH orders (for apple-to-apple comparison)
- * plus exact Routes API figures for the optimised order.
+ * Returns `null` (so the caller can fall back to Haversine) when:
+ *   • the travel mode is TRANSIT (Route Matrix does not support transit), or
+ *   • too many pairs are unreachable to trust the matrix.
+ * Throws only on auth failure so the route handler can surface it.
  */
-export async function computeOptimisedRoute(
-  points: OptimiseRoutePoint[],
+async function fetchRoadCostMatrix(
+  points: Array<{ lat: number; lng: number }>,
   travelMode: TravelMode,
-  // mode is a hint; all modes use nearest-neighbour ordering since we don't have
-  // live traffic data at this tier. Stored in the result for client display.
-  mode: RouteOptimiseMode,
-): Promise<OptimiseRouteResult> {
+): Promise<RoadCostMatrix | null> {
   const key = getServerMapsKey()
-  if (!key) throw new Error('maps_not_configured')
-  if (points.length < 2) throw new Error('not_enough_points')
-
   const n = points.length
+  const apiMode = TRAVEL_MODE_MAP[travelMode]
 
-  // 1. Build Haversine pairwise distance matrix.
-  const dist: number[][] = Array.from({ length: n }, () => new Array(n).fill(0) as number[])
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      if (i !== j) {
-        dist[i][j] = haversineMeters(
-          points[i]!.lat, points[i]!.lng,
-          points[j]!.lat, points[j]!.lng,
-        )
-      }
-    }
+  // Compute Route Matrix supports DRIVE / WALK / BICYCLE / TWO_WHEELER — not TRANSIT.
+  if (apiMode === 'TRANSIT') return null
+
+  const toMatrixWaypoint = (p: { lat: number; lng: number }) => ({
+    waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } },
+  })
+
+  const body: Record<string, unknown> = {
+    origins: points.map(toMatrixWaypoint),
+    destinations: points.map(toMatrixWaypoint),
+    travelMode: apiMode,
+  }
+  // Live traffic for driving (no departureTime ⇒ "now").
+  if (travelMode === 'driving') {
+    body.routingPreference = 'TRAFFIC_AWARE'
   }
 
-  // 2. Nearest-neighbour from index 0 (preserve the starting point).
+  const res = await fetch(
+    'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask':
+          'originIndex,destinationIndex,distanceMeters,duration,condition',
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    }
+  )
+
+  if (!res.ok) {
+    if (res.status === 403 || res.status === 401) throw new Error('maps_auth_error')
+    // A non-auth failure is recoverable — let the caller fall back to Haversine.
+    return null
+  }
+
+  const data = (await res.json()) as RouteMatrixElement[] | { error?: unknown }
+  if (!Array.isArray(data)) return null
+
+  const INF = Number.POSITIVE_INFINITY
+  const distance: number[][] = Array.from({ length: n }, () => new Array(n).fill(INF) as number[])
+  const duration: number[][] = Array.from({ length: n }, () => new Array(n).fill(INF) as number[])
+  for (let i = 0; i < n; i++) {
+    distance[i]![i] = 0
+    duration[i]![i] = 0
+  }
+
+  let reachable = 0
+  for (const el of data) {
+    const oi = el.originIndex
+    const di = el.destinationIndex
+    if (oi == null || di == null || oi >= n || di >= n) continue
+    if (el.condition && el.condition !== 'ROUTE_EXISTS') continue
+    if (oi === di) continue
+    if (typeof el.distanceMeters === 'number') distance[oi]![di] = el.distanceMeters
+    duration[oi]![di] = parseDurationSeconds(el.duration)
+    reachable++
+  }
+
+  // Need at least half the off-diagonal pairs to trust the matrix.
+  if (reachable < n * (n - 1) * 0.5) return null
+  return { distance, duration }
+}
+
+// ── TSP heuristic (nearest-neighbour + 2-opt) ──────────────────────────────
+
+/** Total cost of an OPEN path (no return-to-start edge). */
+function pathCost(order: number[], cost: number[][]): number {
+  let total = 0
+  for (let i = 0; i < order.length - 1; i++) {
+    const c = cost[order[i]!]![order[i + 1]!]!
+    if (Number.isFinite(c)) total += c
+  }
+  return total
+}
+
+/**
+ * Order the visit sequence to minimise total road cost using a nearest-neighbour
+ * construction followed by 2-opt local search. Endpoints can be pinned:
+ *   • fixStart keeps index 0 first (the user's chosen day-start).
+ *   • fixEnd keeps index n-1 last (e.g. returning to the hotel).
+ * Works on any cost matrix — road duration, road distance, a blend, or Haversine.
+ */
+function solveOrder(
+  cost: number[][],
+  n: number,
+  fixStart: boolean,
+  fixEnd: boolean,
+): number[] {
+  if (n <= 2) return Array.from({ length: n }, (_, i) => i)
+
+  const endNode = fixEnd ? n - 1 : -1
+
+  // 1. Nearest-neighbour construction from index 0.
   const visited = new Array(n).fill(false) as boolean[]
   const order: number[] = [0]
   visited[0] = true
+  if (endNode === 0) {
+    // Degenerate (start == fixed end) — should not happen for n > 2.
+  }
 
-  while (order.length < n) {
+  const targetLen = fixEnd ? n - 1 : n
+  while (order.length < targetLen) {
     const last = order[order.length - 1]!
     let best = -1
-    let bestDist = Infinity
+    let bestCost = Number.POSITIVE_INFINITY
     for (let j = 0; j < n; j++) {
-      if (!visited[j] && dist[last]![j]! < bestDist) {
-        bestDist = dist[last]![j]!
+      if (visited[j] || j === endNode) continue
+      const c = cost[last]![j]!
+      if (c < bestCost) {
+        bestCost = c
         best = j
       }
     }
@@ -372,67 +479,279 @@ export async function computeOptimisedRoute(
     order.push(best)
     visited[best] = true
   }
-
-  // 3. Haversine totals for both orders.
-  let originalHaversine = 0
-  for (let i = 0; i < n - 1; i++) {
-    originalHaversine += dist[i]![i + 1]!
+  if (fixEnd && !visited[endNode]!) {
+    order.push(endNode)
+    visited[endNode] = true
+  }
+  // Safety: append anything left unvisited (e.g. all-unreachable rows).
+  for (let j = 0; j < n; j++) {
+    if (!visited[j]) {
+      order.push(j)
+      visited[j] = true
+    }
   }
 
-  let optimisedHaversine = 0
+  // 2. 2-opt improvement. Reversing order[i..k] only touches edges (i-1,i) and
+  //    (k,k+1); we keep i ≥ 1 when the start is pinned and k ≤ n-2 when the end
+  //    is pinned so the fixed endpoints never move.
+  const iMin = fixStart ? 1 : 0
+  const kMax = fixEnd ? n - 2 : n - 1
+  let improved = true
+  let guard = 0
+  while (improved && guard < 60) {
+    improved = false
+    guard++
+    let bestTotal = pathCost(order, cost)
+    for (let i = iMin; i < kMax; i++) {
+      for (let k = i + 1; k <= kMax; k++) {
+        // Reverse the segment in place, measure, keep or revert.
+        let a = i
+        let b = k
+        while (a < b) {
+          const t = order[a]!
+          order[a] = order[b]!
+          order[b] = t
+          a++
+          b--
+        }
+        const next = pathCost(order, cost)
+        if (next < bestTotal - 1e-6) {
+          bestTotal = next
+          improved = true
+        } else {
+          // revert
+          a = i
+          b = k
+          while (a < b) {
+            const t = order[a]!
+            order[a] = order[b]!
+            order[b] = t
+            a++
+            b--
+          }
+        }
+      }
+    }
+  }
+
+  return order
+}
+
+/** Sum consecutive road legs of a sequence through a cost matrix (skips ∞). */
+function sumSequence(order: number[], cost: number[][]): number {
+  let total = 0
   for (let i = 0; i < order.length - 1; i++) {
-    optimisedHaversine += dist[order[i]!]![order[i + 1]!]!
+    const c = cost[order[i]!]![order[i + 1]!]!
+    if (Number.isFinite(c)) total += c
+  }
+  return total
+}
+
+/** Max finite value in a matrix (for normalising the balanced blend). */
+function maxFinite(m: number[][]): number {
+  let max = 0
+  for (const row of m) {
+    for (const v of row) {
+      if (Number.isFinite(v) && v > max) max = v
+    }
+  }
+  return max || 1
+}
+
+// ── Routes API — smart route optimiser (Phase 7D / road-aware rewrite) ─────
+
+/**
+ * Find an optimised visit order using REAL road costs, then return exact road
+ * distance/time and a drawable polyline for that order.
+ *
+ * Primary path (when a key is configured and the matrix is reachable):
+ *   1. Build a traffic-aware road-cost matrix via Compute Route Matrix.
+ *   2. Solve the order with a TSP heuristic (nearest-neighbour + 2-opt) on the
+ *      cost metric the mode asks for: duration (fastest), distance (shortest),
+ *      or a normalised blend (balanced).
+ *   3. Pin the start/end as requested (default: keep first fixed).
+ *   4. One Compute Routes call for the optimised order → polyline + totals.
+ *
+ * Fallback path (no matrix — e.g. TRANSIT mode or a transient matrix failure):
+ *   Solve the order with Haversine straight-line costs instead, clearly labelled
+ *   `haversine_fallback`. Haversine is NEVER the primary order when the road
+ *   matrix is available.
+ *
+ * Returns Haversine totals for both orders (used by the rule-based coach) plus
+ * exact road totals for the original AND optimised orders so the UI can show a
+ * real before/after with distance + time saved.
+ */
+export async function computeOptimisedRoute(
+  points: OptimiseRoutePoint[],
+  travelMode: TravelMode,
+  mode: RouteOptimiseMode,
+  opts: { keepFirstFixed?: boolean; keepLastFixed?: boolean } = {},
+): Promise<OptimiseRouteResult> {
+  const key = getServerMapsKey()
+  if (!key) throw new Error('maps_not_configured')
+  if (points.length < 2) throw new Error('not_enough_points')
+
+  const n = points.length
+  const keepFirstFixed = opts.keepFirstFixed ?? true
+  const keepLastFixed = opts.keepLastFixed ?? false
+  const coordsAll = points.map((p) => ({ lat: p.lat, lng: p.lng }))
+  const warnings: string[] = []
+
+  // Haversine matrix — always available, used for coach comparison + fallback.
+  const hav: number[][] = Array.from({ length: n }, () => new Array(n).fill(0) as number[])
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (i !== j) {
+        hav[i]![j] = haversineMeters(
+          points[i]!.lat, points[i]!.lng,
+          points[j]!.lat, points[j]!.lng,
+        )
+      }
+    }
   }
 
-  // 4. Google Routes API exact figures for the optimised order.
-  const optimisedPoints = order.map((i) => points[i]!)
-  const coords = optimisedPoints.map((p) => ({ lat: p.lat, lng: p.lng }))
+  // 1. Try the real road-cost matrix (traffic-aware for driving).
+  let roadMatrix: RoadCostMatrix | null = null
+  try {
+    roadMatrix = await fetchRoadCostMatrix(coordsAll, travelMode)
+  } catch (err) {
+    if ((err as Error).message === 'maps_auth_error') throw err
+    roadMatrix = null
+  }
 
+  // 2. Choose the cost metric for the requested mode and solve the order.
+  let order: number[]
+  let optimisationMethod: RouteOptimisationMethod
+  let trafficAware = false
+
+  if (roadMatrix) {
+    let cost: number[][]
+    if (mode === 'shortest') {
+      cost = roadMatrix.distance
+    } else if (mode === 'fastest') {
+      cost = roadMatrix.duration
+    } else {
+      // balanced — normalise each metric to [0,1] and average.
+      const maxD = maxFinite(roadMatrix.distance)
+      const maxT = maxFinite(roadMatrix.duration)
+      cost = roadMatrix.distance.map((row, i) =>
+        row.map((d, j) => {
+          const t = roadMatrix!.duration[i]![j]!
+          if (!Number.isFinite(d) || !Number.isFinite(t)) return Number.POSITIVE_INFINITY
+          return 0.5 * (d / maxD) + 0.5 * (t / maxT)
+        }),
+      )
+    }
+    order = solveOrder(cost, n, keepFirstFixed, keepLastFixed)
+    optimisationMethod = 'route_matrix_tsp'
+    trafficAware = travelMode === 'driving'
+  } else {
+    // Fallback: order by straight-line distance (clearly labelled).
+    order = solveOrder(hav, n, keepFirstFixed, keepLastFixed)
+    optimisationMethod = 'haversine_fallback'
+    warnings.push(
+      'Live road data was unavailable — order estimated from straight-line distances.',
+    )
+  }
+
+  // 3. Haversine totals (kept for the rule-based coach).
+  const identity = Array.from({ length: n }, (_, i) => i)
+  const originalHaversine = sumSequence(identity, hav)
+  const optimisedHaversine = sumSequence(order, hav)
+
+  // 4. Road totals for the ORIGINAL order (from the matrix, when we have it).
+  let originalRouteDistanceMeters = 0
+  let originalRouteDurationSeconds = 0
+  if (roadMatrix) {
+    originalRouteDistanceMeters = Math.round(sumSequence(identity, roadMatrix.distance))
+    originalRouteDurationSeconds = Math.round(sumSequence(identity, roadMatrix.duration))
+  }
+
+  // 5. One Compute Routes call for the optimised order → polyline + exact totals.
+  const optimisedCoords = order.map((i) => ({ lat: points[i]!.lat, lng: points[i]!.lng }))
   let routeDistMeters = 0
   let routeDurSeconds = 0
   let encodedPolyline: string | null = null
-  const warnings: string[] = []
-
   try {
-    const { legs: apiLegs, encodedPolyline: poly } = await fetchRoutesApiLegs(coords, travelMode)
+    const { legs: apiLegs, encodedPolyline: poly } = await fetchRoutesApiLegs(
+      optimisedCoords,
+      travelMode,
+      { trafficAware: travelMode === 'driving' },
+    )
     for (const leg of apiLegs) {
       routeDistMeters += leg.distanceMeters ?? 0
       routeDurSeconds += parseDurationSeconds(leg.duration)
     }
     encodedPolyline = poly
   } catch {
-    warnings.push('Exact road times unavailable — showing straight-line estimates only.')
+    warnings.push('Exact road totals unavailable — showing estimates only.')
   }
 
-  // 5. Coach warnings.
-  const savedHaversine = originalHaversine - optimisedHaversine
-  const savedPct = originalHaversine > 0 ? (savedHaversine / originalHaversine) * 100 : 0
+  // If Compute Routes failed but the matrix is present, fall back to matrix sums.
+  if (routeDistMeters === 0 && roadMatrix) {
+    routeDistMeters = Math.round(sumSequence(order, roadMatrix.distance))
+  }
+  if (routeDurSeconds === 0 && roadMatrix) {
+    routeDurSeconds = Math.round(sumSequence(order, roadMatrix.duration))
+  }
 
-  if (savedPct > 25) {
+  // 6. Savings (only meaningful when we have road totals for both orders).
+  const distanceSavedMeters =
+    originalRouteDistanceMeters > 0 ? originalRouteDistanceMeters - routeDistMeters : 0
+  const durationSavedSeconds =
+    originalRouteDurationSeconds > 0 ? originalRouteDurationSeconds - routeDurSeconds : 0
+
+  // 7. Coach warnings.
+  if (durationSavedSeconds > 5 * 60) {
     warnings.push(
-      `Significant backtracking detected — optimised order saves ≈${(savedHaversine / 1000).toFixed(1)} km straight-line.`
+      `Optimised order saves ≈${formatDuration(durationSavedSeconds)} of driving (${formatDistance(Math.max(0, distanceSavedMeters))} less).`,
     )
+  } else {
+    const savedHav = originalHaversine - optimisedHaversine
+    const savedPct = originalHaversine > 0 ? (savedHav / originalHaversine) * 100 : 0
+    if (savedPct > 25) {
+      warnings.push(
+        `Significant backtracking detected — optimised order saves ≈${(savedHav / 1000).toFixed(1)} km straight-line.`,
+      )
+    }
   }
   if (routeDurSeconds > 4 * 3600) {
     warnings.push(
-      `Even optimised, this day has ${formatDuration(routeDurSeconds)} of travel — consider splitting across days.`
+      `Even optimised, this day has ${formatDuration(routeDurSeconds)} of travel — consider splitting across days.`,
     )
   }
   if (n > 8) {
     warnings.push(
-      `${n} stops in one day is ambitious. A relaxed pace typically fits 4–6 stops.`
+      `${n} stops in one day is ambitious. A relaxed pace typically fits 4–6 stops.`,
     )
+  }
+
+  // Dev-only: log the method + before/after labels (never the key or raw response).
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(
+      `[Voyago Optimise] method=${optimisationMethod} mode=${mode} traffic=${trafficAware} keepFirst=${keepFirstFixed} keepLast=${keepLastFixed}`,
+    )
+    console.log('[Voyago Optimise] original:', points.map((p) => p.name))
+    console.log('[Voyago Optimise] optimised:', order.map((i) => points[i]!.name))
   }
 
   return {
     mode,
     travelMode,
+    optimisationMethod,
+    trafficAware,
+    keepFirstFixed,
+    keepLastFixed,
     originalOrder: points.map((p) => p.id),
     optimisedOrder: order.map((i) => points[i]!.id),
     originalHaversineMeters: Math.round(originalHaversine),
     optimisedHaversineMeters: Math.round(optimisedHaversine),
+    originalRouteDistanceMeters,
+    originalRouteDurationSeconds,
     optimisedRouteDistanceMeters: Math.round(routeDistMeters),
     optimisedRouteDurationSeconds: routeDurSeconds,
+    distanceSavedMeters,
+    durationSavedSeconds,
     ...(encodedPolyline ? { routePolyline: encodedPolyline } : {}),
     warnings,
   }
