@@ -549,3 +549,39 @@ export interface PlaybackPoint {
   memoryCtx?: PlaybackPointMemoryContext
   locationCtx?: PlaybackPointLocationContext
 }
+
+// ── Route Optimiser (Phase 7D) ────────────────────────────────────────────
+//
+// Smart AI Route Optimiser uses a nearest-neighbour heuristic (Haversine) for
+// ordering then calls Google Routes API for exact road distances and durations.
+// All optimisation calls are user-triggered — never automatic. Returns 503 when
+// Maps is not configured so the UI degrades to Haversine-only mode.
+
+export type RouteOptimiseMode = 'fastest' | 'shortest' | 'balanced'
+
+/** A single point to include in an optimisation request. */
+export interface OptimiseRoutePoint {
+  id: string
+  name: string
+  lat: number
+  lng: number
+}
+
+/** Result returned by POST /api/maps/route/optimise. */
+export interface OptimiseRouteResult {
+  mode: RouteOptimiseMode
+  travelMode: TravelMode
+  /** Point IDs in the caller-supplied (original) order. */
+  originalOrder: string[]
+  /** Point IDs in the optimised order (nearest-neighbour from start). */
+  optimisedOrder: string[]
+  /** Straight-line Haversine distance for the original order (approx, metres). */
+  originalHaversineMeters: number
+  /** Straight-line Haversine distance for the optimised order (approx, metres). */
+  optimisedHaversineMeters: number
+  /** Exact road distance for the optimised order via Google Routes API (metres). */
+  optimisedRouteDistanceMeters: number
+  /** Exact road travel time for the optimised order via Google Routes API (seconds). */
+  optimisedRouteDurationSeconds: number
+  warnings: string[]
+}

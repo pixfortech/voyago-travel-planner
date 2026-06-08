@@ -1,12 +1,12 @@
 /**
- * Day route endpoint — POST /api/maps/route (Phase 6).
+ * Day route endpoint — POST /api/maps/route (Phase 6 / updated Phase 7D).
  *
  * Body: { dayId: string, points: RouteRequestPoint[], travelMode: TravelMode }
  * Returns: DayRouteSummary
  *
  * Computes sequential travel legs (distance + duration) between ordered
- * activities for one day. Returns 503 `maps_unavailable` when the feature is off
- * or no key is set. User-triggered only — never auto-called.
+ * activities for one day using Google Routes API (computeRoutes). Returns 503
+ * `maps_unavailable` when the feature is off or no key is set. User-triggered only.
  */
 
 import { NextResponse } from 'next/server'
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     ) {
       points.push({ activityId: p.activityId, name: p.name, lat: p.lat, lng: p.lng })
     }
-    if (points.length >= 25) break // Distance Matrix element ceiling
+    if (points.length >= 25) break // Routes API supports up to 25 waypoints
   }
 
   if (points.length < 2) {

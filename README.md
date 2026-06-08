@@ -396,16 +396,21 @@ GOOGLE_MAPS_API_KEY=AIza...        # server-only; never returned to the client
 Enable these in Google Cloud Console for the project that owns the key:
 
 - **Places API (New)** — text place search (`places:searchText`)
-- **Distance Matrix API** — travel time/distance between consecutive activities
+- **Routes API** — travel time/distance (`computeRoutes`); also used by the Route Optimiser (`/api/maps/route/optimise`)
 
 (If you later add an interactive map, also enable the **Maps JavaScript API** and
 use the public `NEXT_PUBLIC_` key for it.)
 
+> **Legacy Distance Matrix API is no longer used.** Phase 7D migrated all route
+> distance and duration calculations to the Google Routes API (`computeRoutes`).
+> If you previously restricted your key to the Distance Matrix API, update the
+> restriction to include the Routes API instead.
+
 ### Restricting the key
 
 - **Server-only key** (`GOOGLE_MAPS_API_KEY`): restrict by **server IP address**
-  (Application restrictions → IP addresses) and by **API** (Places + Distance
-  Matrix only).
+  (Application restrictions → IP addresses) and by **API** (Places API (New) +
+  Routes API).
 - **Public key** (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`): restrict by **HTTP
   referrer** (your domains) and by API. Never use the public key for server
   routes if you can avoid it.
@@ -496,6 +501,65 @@ WebP, and HEIC/HEIF (HEIC may upload without a browser preview), max **15 MB**.
   `firestore.rules`). There is **no public access**.
 - Memories are **not** included in the public share snapshot (Phase 3). Sharing
   photos publicly is intentionally left for a future, opt-in phase.
+
+---
+
+## Smart Route Optimiser (Phase 7D)
+
+The Route Optimiser is built into the **Route Playback** page
+(`/trips/{tripId}/playback`) and adds three new capabilities:
+
+### Manual reorder
+
+Every point in the timeline has up/down arrow buttons (visible when playback is
+paused). Drag-free reordering works on any device. The SVG map and the
+straight-line Haversine distance update immediately after each move.
+
+### Google Routes API optimisation (user-triggered)
+
+The **Optimise via Google Routes** button sends the day's points to
+`POST /api/maps/route/optimise`, which:
+
+1. Builds a Haversine pairwise distance matrix.
+2. Runs a **nearest-neighbour greedy algorithm** (preserving the start point) to
+   find a short visit order.
+3. Calls `Google Routes API → computeRoutes` for the optimised sequence to get
+   the exact road distance and estimated travel time.
+4. Returns the optimised order (point IDs), Haversine approximations for both
+   original and optimised orders, and the exact Routes API figures.
+
+The button is disabled (labelled *setup required*) when Maps is not configured.
+**No API call is made automatically** — it is always user-triggered.
+
+### Route comparison
+
+After optimisation the UI shows three rows:
+
+| Row | Distance type |
+| --- | ------------- |
+| **Original order** | ≈ X km straight-line (Haversine) |
+| **Your order** (after manual reorder) | ≈ Y km straight-line (Haversine) |
+| **Optimised order** | ≈ Z km straight-line + exact road distance & time via Routes API |
+
+The *Apply optimised order* button reshuffles the timeline; *Revert to original*
+returns it to the source order.
+
+### AI Route Coach
+
+The **AI Route Coach** card below the selected-point detail runs **entirely
+locally** (no API call, no key required). It analyses the current day's order
+and distance and surfaces up to three rule-based hints:
+
+- Backtracking detected (optimiser would save >25% straight-line distance)
+- Heavy travel day (>4 hours estimated road time)
+- Too many stops for a comfortable day
+- Or a ✓ confirmation that the route is already near-optimal
+
+### Billing control
+
+The Route Optimiser makes exactly **one** Routes API call per user press of
+*Optimise via Google Routes*. No calls happen on page load, on day change, or on
+manual reorder. The endpoint is rate-limited to 10 requests per IP per minute.
 
 ---
 

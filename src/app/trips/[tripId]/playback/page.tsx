@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Navigation, Camera, Calendar, Play, Pause, RotateCcw,
   Zap, Clock, ChevronLeft, ChevronRight, Map, Info,
+  ArrowUp, ArrowDown, Loader2, AlertTriangle, TrendingUp, CheckCircle2,
 } from 'lucide-react'
 import { getTrip, getItineraryDays, getLocationPoints, getMemories } from '@/lib/firestore'
 import { buildPlaybackPoints, groupPlaybackByDay } from '@/lib/location/playback'
@@ -13,7 +14,7 @@ import { computeTripDistance } from '@/lib/location/distance'
 import AppShell from '@/components/layout/AppShell'
 import type {
   Trip, ItineraryDay, TripLocationPoint, TripMemory,
-  PlaybackPoint, PlaybackPointType,
+  PlaybackPoint, PlaybackPointType, OptimiseRouteResult,
 } from '@/types'
 
 // ── constants ──────────────────────────────────────────────────────────────
@@ -45,7 +46,6 @@ const CATEGORY_LABELS: Partial<Record<string, string>> = {
   other: 'Other',
 }
 
-/** ms between playback steps at 1× speed */
 const BASE_MS = 900
 
 // ── helpers ──────────────────────────────────────────────────────────────
@@ -66,6 +66,99 @@ function fmtDate(iso: string): string {
 function fmtAccuracy(m?: number): string | null {
   if (!m) return null
   return m < 100 ? `±${Math.round(m)} m` : `±${(m / 1000).toFixed(1)} km`
+}
+
+function fmtMeters(m: number): string {
+  if (m >= 1000) return `${(m / 1000).toFixed(1)} km`
+  return `${Math.round(m)} m`
+}
+
+function fmtSeconds(s: number): string {
+  const mins = Math.round(s / 60)
+  if (mins < 60) return `${mins} min`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m > 0 ? `${h} h ${m} min` : `${h} h`
+}
+
+// ── AI Route Coach (rule-based) ───────────────────────────────────────────
+
+interface CoachHint {
+  level: 'ok' | 'tip' | 'warning'
+  text: string
+}
+
+function buildCoachHints(
+  points: PlaybackPoint[],
+  manualKm: number,
+  result: OptimiseRouteResult | null,
+): CoachHint[] {
+  if (points.length === 0) return []
+  const hints: CoachHint[] = []
+
+  if (result) {
+    const origKm = result.originalHaversineMeters / 1000
+    const optKm = result.optimisedHaversineMeters / 1000
+    const savedKm = origKm - optKm
+    const pct = origKm > 0 ? (savedKm / origKm) * 100 : 0
+
+    if (pct > 25) {
+      hints.push({
+        level: 'warning',
+        text: `Backtracking detected — optimised order is ~${savedKm.toFixed(1)} km shorter straight-line (${Math.round(pct)}% improvement).`,
+      })
+    } else if (pct > 8) {
+      hints.push({
+        level: 'tip',
+        text: `Minor optimisation possible — reordering saves ~${savedKm.toFixed(1)} km of travel.`,
+      })
+    } else {
+      hints.push({
+        level: 'ok',
+        text: `Your route order is near-optimal (within ${Math.round(pct)}% of the shortest sequence).`,
+      })
+    }
+
+    if (result.optimisedRouteDurationSeconds > 4 * 3600) {
+      hints.push({
+        level: 'warning',
+        text: `Even optimised, this day has ${fmtSeconds(result.optimisedRouteDurationSeconds)} of road travel. Consider splitting across days.`,
+      })
+    } else if (result.optimisedRouteDurationSeconds > 2 * 3600) {
+      hints.push({
+        level: 'tip',
+        text: `~${fmtSeconds(result.optimisedRouteDurationSeconds)} of road travel planned — factor this into your schedule.`,
+      })
+    }
+  } else {
+    if (manualKm > 50) {
+      hints.push({
+        level: 'warning',
+        text: `~${manualKm.toFixed(0)} km straight-line today — likely a heavy travel day. Consider splitting.`,
+      })
+    } else if (manualKm > 25) {
+      hints.push({
+        level: 'tip',
+        text: `~${manualKm.toFixed(0)} km of ground to cover today. Factor transit time when planning.`,
+      })
+    }
+
+    if (points.length > 8) {
+      hints.push({
+        level: 'tip',
+        text: `${points.length} stops in one day is ambitious. A relaxed pace typically fits 4–6 stops.`,
+      })
+    }
+
+    if (hints.length === 0) {
+      hints.push({
+        level: 'ok',
+        text: `${points.length} stop${points.length !== 1 ? 's' : ''} planned. Tap "Optimise" to check the best visit order.`,
+      })
+    }
+  }
+
+  return hints.slice(0, 3)
 }
 
 // ── SVG route map ──────────────────────────────────────────────────────────
@@ -96,20 +189,17 @@ function RouteSvg({
   const maxLat = Math.max(...lats)
   const minLng = Math.min(...lngs)
   const maxLng = Math.max(...lngs)
-  // Ensure non-zero range so single-point routes render at the center.
   const latRange = Math.max(maxLat - minLat, 0.0003)
   const lngRange = Math.max(maxLng - minLng, 0.0003)
 
   function proj(lat: number, lng: number) {
     return {
       x: SVG_PAD + ((lng - minLng) / lngRange) * (SVG_W - 2 * SVG_PAD),
-      // Latitude increases northward; SVG y increases downward — invert.
       y: SVG_PAD + ((maxLat - lat) / latRange) * (SVG_H - 2 * SVG_PAD),
     }
   }
 
   const pts = points.map((p) => proj(p.latitude, p.longitude))
-
   const fullPolyline = pts.map((p) => `${p.x},${p.y}`).join(' ')
   const traveledPolyline =
     activeIndex >= 1
@@ -122,7 +212,6 @@ function RouteSvg({
       className="w-full"
       aria-label="Approximate route map"
     >
-      {/* CSS animation for the active-point ring — avoid SMIL for TS compat */}
       <style>{`
         .vg-pulse {
           transform-box: fill-box;
@@ -135,23 +224,14 @@ function RouteSvg({
         }
       `}</style>
 
-      {/* Background */}
       <rect width={SVG_W} height={SVG_H} rx="12" fill="#f0fdf4" />
 
-      {/* Dot grid */}
       {Array.from({ length: 6 }, (_, row) =>
         Array.from({ length: 9 }, (_, col) => (
-          <circle
-            key={`g${row}-${col}`}
-            cx={col * 50}
-            cy={row * 52}
-            r="1.5"
-            fill="#bbf7d0"
-          />
+          <circle key={`g${row}-${col}`} cx={col * 50} cy={row * 52} r="1.5" fill="#bbf7d0" />
         ))
       )}
 
-      {/* Full route — faint dashed */}
       {points.length > 1 && (
         <polyline
           points={fullPolyline}
@@ -164,7 +244,6 @@ function RouteSvg({
         />
       )}
 
-      {/* Traveled segment — solid teal */}
       {traveledPolyline && (
         <polyline
           points={traveledPolyline}
@@ -176,9 +255,8 @@ function RouteSvg({
         />
       )}
 
-      {/* Point markers */}
       {pts.map(({ x, y }, i) => {
-        const pt = points[i]
+        const pt = points[i]!
         const isActive = i === activeIndex
         const isPast = activeIndex >= 0 && i <= activeIndex
         const color = COLORS[pt.type]
@@ -192,8 +270,7 @@ function RouteSvg({
               </>
             )}
             <circle
-              cx={x}
-              cy={y}
+              cx={x} cy={y}
               r={isActive ? 7 : 5}
               fill={isPast ? color : '#e2e8f0'}
               stroke="white"
@@ -204,54 +281,24 @@ function RouteSvg({
         )
       })}
 
-      {/* Start / End labels */}
       {pts[0] && (
-        <text
-          x={pts[0].x}
-          y={pts[0].y - 12}
-          fontSize="9"
-          fill="#64748b"
-          textAnchor="middle"
-          fontFamily="sans-serif"
-          fontWeight="600"
-        >
+        <text x={pts[0].x} y={pts[0].y - 12} fontSize="9" fill="#64748b"
+          textAnchor="middle" fontFamily="sans-serif" fontWeight="600">
           Start
         </text>
       )}
       {pts.length > 1 && pts[pts.length - 1] && (
-        <text
-          x={pts[pts.length - 1].x}
-          y={pts[pts.length - 1].y - 12}
-          fontSize="9"
-          fill="#64748b"
-          textAnchor="middle"
-          fontFamily="sans-serif"
-          fontWeight="600"
-        >
+        <text x={pts[pts.length - 1]!.x} y={pts[pts.length - 1]!.y - 12}
+          fontSize="9" fill="#64748b" textAnchor="middle" fontFamily="sans-serif" fontWeight="600">
           End
         </text>
       )}
 
-      {/* North indicator */}
-      <text
-        x={SVG_W - 16}
-        y={20}
-        fontSize="10"
-        fill="#94a3b8"
-        textAnchor="middle"
-        fontFamily="sans-serif"
-      >
+      <text x={SVG_W - 16} y={20} fontSize="10" fill="#94a3b8"
+        textAnchor="middle" fontFamily="sans-serif">
         N↑
       </text>
-
-      {/* Approx note */}
-      <text
-        x={SVG_PAD}
-        y={SVG_H - 6}
-        fontSize="9"
-        fill="#94a3b8"
-        fontFamily="sans-serif"
-      >
+      <text x={SVG_PAD} y={SVG_H - 6} fontSize="9" fill="#94a3b8" fontFamily="sans-serif">
         approx. positions
       </text>
     </svg>
@@ -277,19 +324,35 @@ export default function PlaybackPage() {
   const { tripId } = useParams<{ tripId: string }>()
   const router = useRouter()
 
+  // ── data ──────────────────────────────────────────────────────────────
   const [trip, setTrip] = useState<Trip | null>(null)
   const [days, setDays] = useState<ItineraryDay[]>([])
   const [locationPoints, setLocationPoints] = useState<TripLocationPoint[]>([])
   const [memories, setMemories] = useState<TripMemory[]>([])
   const [loading, setLoading] = useState(true)
 
+  // ── playback ──────────────────────────────────────────────────────────
   const [selectedDayKey, setSelectedDayKey] = useState('')
   const [currentIndex, setCurrentIndex] = useState(-1)
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState<1 | 2 | 4>(1)
 
+  // ── reorder ───────────────────────────────────────────────────────────
+  /** customOrder[i] = index into dayPoints. Starts as identity permutation. */
+  const [customOrder, setCustomOrder] = useState<number[]>([])
+
+  // ── optimiser ─────────────────────────────────────────────────────────
+  const [optimiseResult, setOptimiseResult] = useState<OptimiseRouteResult | null>(null)
+  const [optimisedIndices, setOptimisedIndices] = useState<number[] | null>(null)
+  const [optimising, setOptimising] = useState(false)
+  const [optimiseError, setOptimiseError] = useState<string | null>(null)
+  const [mapsAvailable, setMapsAvailable] = useState(true)
+  const [showCoach, setShowCoach] = useState(true)
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
+
+  // ── data fetch ────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!tripId) return
@@ -298,13 +361,16 @@ export default function PlaybackPage() {
       getLocationPoints(tripId), getMemories(tripId),
     ]).then(([t, d, lp, m]) => {
       if (!t) { router.push('/dashboard'); return }
-      setTrip(t)
-      setDays(d)
-      setLocationPoints(lp)
-      setMemories(m)
-      setLoading(false)
+      setTrip(t); setDays(d); setLocationPoints(lp); setMemories(m); setLoading(false)
     })
   }, [tripId, router])
+
+  useEffect(() => {
+    fetch('/api/maps/status')
+      .then(r => r.ok ? r.json() : { available: false })
+      .then((d: { available?: boolean }) => setMapsAvailable(d.available ?? false))
+      .catch(() => { /* keep optimistic */ })
+  }, [])
 
   // ── derived ───────────────────────────────────────────────────────────
 
@@ -320,10 +386,9 @@ export default function PlaybackPage() {
     [pointsByDay],
   )
 
-  // Auto-select the first day that has points.
   useEffect(() => {
     if (daysWithPoints.length > 0 && !selectedDayKey) {
-      setSelectedDayKey(daysWithPoints[0])
+      setSelectedDayKey(daysWithPoints[0]!)
     }
   }, [daysWithPoints, selectedDayKey])
 
@@ -332,44 +397,59 @@ export default function PlaybackPage() {
     [pointsByDay, selectedDayKey],
   )
 
-  const totalDistance = useMemo(
-    () => computeTripDistance(allPoints),
-    [allPoints],
+  /** Points in the user's chosen order (customOrder permutation of dayPoints). */
+  const displayPoints = useMemo(
+    () => customOrder.map((i) => dayPoints[i]).filter((p): p is PlaybackPoint => p != null),
+    [dayPoints, customOrder],
   )
 
-  const dayDistance = useMemo(() => computeTripDistance(dayPoints), [dayPoints])
+  const isReordered = useMemo(
+    () => customOrder.some((v, i) => v !== i),
+    [customOrder],
+  )
+
+  // Reset custom order and optimiser when day changes.
+  useEffect(() => {
+    const identity = Array.from({ length: dayPoints.length }, (_, i) => i)
+    setCustomOrder(identity)
+    setOptimisedIndices(null)
+    setOptimiseResult(null)
+    setOptimiseError(null)
+    setCurrentIndex(-1)
+    setPlaying(false)
+  }, [selectedDayKey, dayPoints.length])
+
+  const totalDistance = useMemo(() => computeTripDistance(allPoints), [allPoints])
+  const originalDayDistance = useMemo(() => computeTripDistance(dayPoints), [dayPoints])
+  const manualDayDistance = useMemo(() => computeTripDistance(displayPoints), [displayPoints])
 
   const selectedPoint: PlaybackPoint | null =
-    currentIndex >= 0 ? (dayPoints[currentIndex] ?? null) : null
+    currentIndex >= 0 ? (displayPoints[currentIndex] ?? null) : null
+
+  const coachHints = useMemo(
+    () => buildCoachHints(displayPoints, manualDayDistance.totalKm, optimiseResult),
+    [displayPoints, manualDayDistance.totalKm, optimiseResult],
+  )
 
   // ── playback ──────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
     if (!playing) return
-    if (dayPoints.length === 0) { setPlaying(false); return }
+    if (displayPoints.length === 0) { setPlaying(false); return }
 
     const ms = Math.round(BASE_MS / speed)
     intervalRef.current = setInterval(() => {
       setCurrentIndex((prev) => {
         const next = prev + 1
-        if (next >= dayPoints.length) {
-          setPlaying(false)
-          return prev
-        }
+        if (next >= displayPoints.length) { setPlaying(false); return prev }
         return next
       })
     }, ms)
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [playing, speed, dayPoints])
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [playing, speed, displayPoints])
 
-  // Scroll active timeline item into view.
   useEffect(() => {
     if (currentIndex < 0 || !timelineRef.current) return
     const el = timelineRef.current.querySelector(`[data-idx="${currentIndex}"]`)
@@ -379,7 +459,7 @@ export default function PlaybackPage() {
   // ── handlers ──────────────────────────────────────────────────────────
 
   function handlePlay() {
-    if (dayPoints.length === 0) return
+    if (displayPoints.length === 0) return
     if (currentIndex < 0) setCurrentIndex(0)
     setPlaying(true)
   }
@@ -399,6 +479,91 @@ export default function PlaybackPage() {
 
   function handleSpeedCycle() {
     setSpeed((prev) => (prev === 1 ? 2 : prev === 2 ? 4 : 1))
+  }
+
+  function handleMoveUp(displayIdx: number) {
+    if (displayIdx <= 0 || playing) return
+    setCustomOrder((prev) => {
+      const next = [...prev]
+      const tmp = next[displayIdx - 1]!
+      next[displayIdx - 1] = next[displayIdx]!
+      next[displayIdx] = tmp
+      return next
+    })
+    setCurrentIndex(-1)
+    setOptimisedIndices(null)
+    setOptimiseResult(null)
+    setOptimiseError(null)
+  }
+
+  function handleMoveDown(displayIdx: number) {
+    if (displayIdx >= customOrder.length - 1 || playing) return
+    setCustomOrder((prev) => {
+      const next = [...prev]
+      const tmp = next[displayIdx + 1]!
+      next[displayIdx + 1] = next[displayIdx]!
+      next[displayIdx] = tmp
+      return next
+    })
+    setCurrentIndex(-1)
+    setOptimisedIndices(null)
+    setOptimiseResult(null)
+    setOptimiseError(null)
+  }
+
+  function handleRevertToOriginal() {
+    setCustomOrder(Array.from({ length: dayPoints.length }, (_, i) => i))
+    setCurrentIndex(-1)
+    setPlaying(false)
+    setOptimisedIndices(null)
+    setOptimiseResult(null)
+    setOptimiseError(null)
+  }
+
+  function handleApplyOptimised() {
+    if (!optimisedIndices) return
+    setCustomOrder(optimisedIndices)
+    setCurrentIndex(-1)
+    setPlaying(false)
+  }
+
+  async function handleOptimise() {
+    if (dayPoints.length < 2 || optimising) return
+    setOptimising(true)
+    setOptimiseError(null)
+
+    try {
+      const body = {
+        points: dayPoints.map((p) => ({ id: p.id, name: p.label, lat: p.latitude, lng: p.longitude })),
+        travelMode: 'driving',
+        mode: 'fastest',
+      }
+      const res = await fetch('/api/maps/route/optimise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (res.status === 503) {
+        setMapsAvailable(false)
+        throw new Error('Google Maps is not configured for this deployment.')
+      }
+      if (!res.ok) throw new Error('Route optimisation failed. Please try again.')
+
+      const data = (await res.json()) as OptimiseRouteResult
+      setOptimiseResult(data)
+
+      // Map optimised order (point IDs) back to dayPoints indices.
+      const idToIdx: Record<string, number> = {}
+      dayPoints.forEach((p, i) => { idToIdx[p.id] = i })
+      const indices = data.optimisedOrder
+        .map((id) => idToIdx[id])
+        .filter((i): i is number => i !== undefined)
+      setOptimisedIndices(indices)
+    } catch (err) {
+      setOptimiseError(err instanceof Error ? err.message : 'Optimisation failed.')
+    } finally {
+      setOptimising(false)
+    }
   }
 
   const dayIdx = daysWithPoints.indexOf(selectedDayKey)
@@ -463,8 +628,8 @@ export default function PlaybackPage() {
   // ── render ────────────────────────────────────────────────────────────
 
   const progressPct =
-    dayPoints.length > 1 && currentIndex >= 0
-      ? Math.round((currentIndex / (dayPoints.length - 1)) * 100)
+    displayPoints.length > 1 && currentIndex >= 0
+      ? Math.round((currentIndex / (displayPoints.length - 1)) * 100)
       : 0
 
   return (
@@ -491,7 +656,7 @@ export default function PlaybackPage() {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => dayIdx > 0 && handleDayChange(daysWithPoints[dayIdx - 1])}
+              onClick={() => dayIdx > 0 && handleDayChange(daysWithPoints[dayIdx - 1]!)}
               disabled={dayIdx <= 0}
               className="p-1.5 rounded-xl hover:bg-gray-100 disabled:opacity-25 transition-colors flex-shrink-0"
             >
@@ -518,7 +683,7 @@ export default function PlaybackPage() {
             </div>
 
             <button
-              onClick={() => dayIdx < daysWithPoints.length - 1 && handleDayChange(daysWithPoints[dayIdx + 1])}
+              onClick={() => dayIdx < daysWithPoints.length - 1 && handleDayChange(daysWithPoints[dayIdx + 1]!)}
               disabled={dayIdx >= daysWithPoints.length - 1}
               className="p-1.5 rounded-xl hover:bg-gray-100 disabled:opacity-25 transition-colors flex-shrink-0"
             >
@@ -539,12 +704,21 @@ export default function PlaybackPage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold text-gray-700">{fmtDate(selectedDayKey)}</span>
                   <span className="text-gray-300">·</span>
-                  <span className="text-xs text-gray-400">{dayPoints.length} point{dayPoints.length !== 1 ? 's' : ''}</span>
-                  {dayPoints.length >= 2 && (
+                  <span className="text-xs text-gray-400">
+                    {displayPoints.length} point{displayPoints.length !== 1 ? 's' : ''}
+                  </span>
+                  {displayPoints.length >= 2 && (
                     <>
                       <span className="text-gray-300">·</span>
-                      <span className="text-xs text-primary-600 font-semibold">≈ {dayDistance.totalKm} km</span>
+                      <span className="text-xs text-primary-600 font-semibold">
+                        ≈ {manualDayDistance.totalKm} km
+                      </span>
                     </>
+                  )}
+                  {isReordered && (
+                    <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full font-bold">
+                      reordered
+                    </span>
                   )}
                 </div>
                 <div className="flex items-center gap-1 text-[10px] text-gray-400">
@@ -553,13 +727,12 @@ export default function PlaybackPage() {
                 </div>
               </div>
               <div className="px-2 pb-2">
-                <RouteSvg points={dayPoints} activeIndex={currentIndex} />
+                <RouteSvg points={displayPoints} activeIndex={currentIndex} />
               </div>
             </div>
 
             {/* Playback controls */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3 space-y-3">
-              {/* Progress bar */}
               <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                 <motion.div
                   className="h-full bg-primary-400 rounded-full"
@@ -569,7 +742,6 @@ export default function PlaybackPage() {
               </div>
 
               <div className="flex items-center justify-between">
-                {/* Transport controls */}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleReset}
@@ -589,7 +761,7 @@ export default function PlaybackPage() {
                   ) : (
                     <button
                       onClick={handlePlay}
-                      disabled={dayPoints.length === 0}
+                      disabled={displayPoints.length === 0}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary-500 hover:bg-primary-600 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-bold shadow-sm transition-colors"
                     >
                       <Play size={14} />
@@ -598,10 +770,9 @@ export default function PlaybackPage() {
                   )}
                 </div>
 
-                {/* Counter + speed */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-400 tabular-nums">
-                    {currentIndex >= 0 ? `${currentIndex + 1}` : '0'}/{dayPoints.length}
+                    {currentIndex >= 0 ? `${currentIndex + 1}` : '0'}/{displayPoints.length}
                   </span>
                   <button
                     onClick={handleSpeedCycle}
@@ -614,6 +785,102 @@ export default function PlaybackPage() {
                 </div>
               </div>
             </div>
+
+            {/* Route Optimiser card */}
+            {dayPoints.length >= 2 && (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp size={14} className="text-primary-500" />
+                    <p className="text-xs font-black text-gray-700">Route Optimiser</p>
+                  </div>
+                  {isReordered && (
+                    <button
+                      onClick={handleRevertToOriginal}
+                      className="text-[11px] text-gray-400 hover:text-gray-600 underline transition-colors"
+                    >
+                      Revert to original
+                    </button>
+                  )}
+                </div>
+
+                {/* Distance comparison */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500">Original order</span>
+                    <span className="font-semibold text-gray-700 tabular-nums">
+                      ≈ {originalDayDistance.totalKm} km
+                      <span className="text-gray-400 font-normal ml-1">straight-line</span>
+                    </span>
+                  </div>
+
+                  {isReordered && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-amber-600 font-medium">Your order</span>
+                      <span className="font-semibold text-amber-700 tabular-nums">
+                        ≈ {manualDayDistance.totalKm} km
+                        <span className="text-amber-500 font-normal ml-1">straight-line</span>
+                      </span>
+                    </div>
+                  )}
+
+                  {optimiseResult && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-primary-600 font-medium">Optimised order</span>
+                      <div className="text-right">
+                        <span className="font-semibold text-primary-700 tabular-nums">
+                          ≈ {(optimiseResult.optimisedHaversineMeters / 1000).toFixed(1)} km
+                          <span className="text-primary-400 font-normal ml-1">straight-line</span>
+                        </span>
+                        {optimiseResult.optimisedRouteDurationSeconds > 0 && (
+                          <div className="text-[11px] text-primary-500">
+                            {fmtMeters(optimiseResult.optimisedRouteDistanceMeters)} road ·{' '}
+                            {fmtSeconds(optimiseResult.optimisedRouteDurationSeconds)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex flex-wrap gap-2">
+                  {optimisedIndices && (
+                    <button
+                      onClick={handleApplyOptimised}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold transition-colors"
+                    >
+                      <CheckCircle2 size={12} />
+                      Apply optimised order
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleOptimise}
+                    disabled={optimising || !mapsAvailable || dayPoints.length < 2}
+                    title={!mapsAvailable ? 'Google Maps not configured — set GOOGLE_MAPS_API_KEY' : undefined}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-700 disabled:bg-gray-100 disabled:text-gray-400 text-white text-xs font-bold transition-colors"
+                  >
+                    {optimising ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <TrendingUp size={12} />
+                    )}
+                    {optimising ? 'Optimising…' : optimiseResult ? 'Re-optimise' : 'Optimise via Google Routes'}
+                    {!mapsAvailable && !optimising && (
+                      <span className="text-[10px] text-gray-400 ml-0.5">(setup required)</span>
+                    )}
+                  </button>
+                </div>
+
+                {optimiseError && (
+                  <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">
+                    <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+                    {optimiseError}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Legend */}
             <div className="flex flex-wrap gap-2">
@@ -633,76 +900,108 @@ export default function PlaybackPage() {
               style={{ maxHeight: 460 }}
             >
               <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between flex-shrink-0">
-                <p className="text-xs font-black text-gray-500 uppercase tracking-wider">Timeline</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs font-black text-gray-500 uppercase tracking-wider">Timeline</p>
+                  {!playing && displayPoints.length >= 2 && (
+                    <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded-full">
+                      reorder ↕
+                    </span>
+                  )}
+                </div>
                 {currentIndex >= 0 && (
                   <span className="text-[11px] text-primary-600 font-bold bg-primary-50 px-2 py-0.5 rounded-full">
-                    {currentIndex + 1} / {dayPoints.length}
+                    {currentIndex + 1} / {displayPoints.length}
                   </span>
                 )}
               </div>
 
               <div ref={timelineRef} className="overflow-y-auto flex-1">
-                {dayPoints.length === 0 ? (
+                {displayPoints.length === 0 ? (
                   <div className="py-10 text-center text-gray-400">
                     <p className="text-xs">No points for this day</p>
                   </div>
                 ) : (
-                  dayPoints.map((pt, i) => {
+                  displayPoints.map((pt, i) => {
                     const isActive = i === currentIndex
                     return (
-                      <button
+                      <div
                         key={pt.id}
                         data-idx={i}
-                        onClick={() => { setCurrentIndex(i); setPlaying(false) }}
-                        className={`w-full flex items-start gap-3 px-4 py-3 text-left border-b border-gray-50 last:border-0 transition-colors hover:bg-gray-50 ${
-                          isActive ? 'bg-primary-50 hover:bg-primary-50' : ''
+                        className={`flex items-start gap-0 border-b border-gray-50 last:border-0 transition-colors ${
+                          isActive ? 'bg-primary-50' : 'hover:bg-gray-50'
                         }`}
                       >
-                        {/* Connector column */}
-                        <div className="flex flex-col items-center flex-shrink-0 mt-0.5">
-                          <div
-                            className="w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm flex-shrink-0"
-                            style={isActive ? { backgroundColor: COLORS[pt.type] } : { backgroundColor: '#f1f5f9' }}
-                          >
-                            <span style={isActive ? { filter: 'brightness(10)' } : undefined}>
-                              <PointIcon type={pt.type} size={11} />
-                            </span>
-                          </div>
-                          {i < dayPoints.length - 1 && (
-                            <div className="w-px bg-gray-100 flex-1 mt-1" style={{ minHeight: 10 }} />
-                          )}
-                        </div>
-
-                        {/* Text */}
-                        <div className="flex-1 min-w-0">
-                          <p
-                            className={`text-xs font-bold truncate ${
-                              isActive ? 'text-primary-700' : 'text-gray-800'
-                            }`}
-                          >
-                            {pt.label}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-                            {pt.timestamp && (
-                              <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
-                                <Clock size={9} /> {fmtTime(pt.timestamp)}
-                              </span>
-                            )}
-                            {pt.accuracy && (
-                              <span className="text-[10px] text-gray-400">{fmtAccuracy(pt.accuracy)}</span>
-                            )}
-                            <span
-                              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-                              style={{
-                                backgroundColor: COLORS[pt.type] + '22',
-                                color: COLORS[pt.type],
-                              }}
+                        {/* Reorder buttons */}
+                        {!playing && (
+                          <div className="flex flex-col items-center justify-center pl-2 pr-1 py-3 gap-0.5 flex-shrink-0">
+                            <button
+                              onClick={() => handleMoveUp(i)}
+                              disabled={i === 0}
+                              className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-20 text-gray-400 transition-colors"
+                              title="Move up"
                             >
-                              {TYPE_LABELS[pt.type]}
-                            </span>
+                              <ArrowUp size={11} />
+                            </button>
+                            <button
+                              onClick={() => handleMoveDown(i)}
+                              disabled={i === displayPoints.length - 1}
+                              className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-20 text-gray-400 transition-colors"
+                              title="Move down"
+                            >
+                              <ArrowDown size={11} />
+                            </button>
                           </div>
-                        </div>
-                      </button>
+                        )}
+
+                        {/* Timeline row (clickable) */}
+                        <button
+                          onClick={() => { setCurrentIndex(i); setPlaying(false) }}
+                          className="flex-1 flex items-start gap-3 px-3 py-3 text-left"
+                        >
+                          <div className="flex flex-col items-center flex-shrink-0 mt-0.5">
+                            <div
+                              className="w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm flex-shrink-0"
+                              style={isActive ? { backgroundColor: COLORS[pt.type] } : { backgroundColor: '#f1f5f9' }}
+                            >
+                              <span style={isActive ? { filter: 'brightness(10)' } : undefined}>
+                                <PointIcon type={pt.type} size={11} />
+                              </span>
+                            </div>
+                            {i < displayPoints.length - 1 && (
+                              <div className="w-px bg-gray-100 flex-1 mt-1" style={{ minHeight: 10 }} />
+                            )}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <p
+                              className={`text-xs font-bold truncate ${
+                                isActive ? 'text-primary-700' : 'text-gray-800'
+                              }`}
+                            >
+                              {pt.label}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                              {pt.timestamp && (
+                                <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                                  <Clock size={9} /> {fmtTime(pt.timestamp)}
+                                </span>
+                              )}
+                              {pt.accuracy && (
+                                <span className="text-[10px] text-gray-400">{fmtAccuracy(pt.accuracy)}</span>
+                              )}
+                              <span
+                                className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                                style={{
+                                  backgroundColor: COLORS[pt.type] + '22',
+                                  color: COLORS[pt.type],
+                                }}
+                              >
+                                {TYPE_LABELS[pt.type]}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      </div>
                     )
                   })
                 )}
@@ -726,7 +1025,6 @@ export default function PlaybackPage() {
                 style={{ borderColor: COLORS[selectedPoint.type] + '55' }}
               >
                 <div className="flex items-start gap-3">
-                  {/* Memory photo thumbnail */}
                   {selectedPoint.memoryCtx?.photoUrl && (
                     <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0 border border-gray-100">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -739,7 +1037,6 @@ export default function PlaybackPage() {
                     </div>
                   )}
 
-                  {/* Icon for non-memory points */}
                   {!selectedPoint.memoryCtx && (
                     <div
                       className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -775,14 +1072,12 @@ export default function PlaybackPage() {
                       </span>
                     </div>
 
-                    {/* Location context: note */}
                     {selectedPoint.locationCtx?.note && (
                       <p className="text-sm text-gray-600 mt-1 leading-snug">
                         {selectedPoint.locationCtx.note}
                       </p>
                     )}
 
-                    {/* Activity context */}
                     {selectedPoint.activityCtx && (
                       <div className="flex flex-wrap items-center gap-2 mt-1.5">
                         {selectedPoint.activityCtx.category && (
@@ -801,7 +1096,6 @@ export default function PlaybackPage() {
                       </div>
                     )}
 
-                    {/* Memory context: place */}
                     {selectedPoint.memoryCtx?.placeName && (
                       <span className="text-xs text-gray-500 flex items-center gap-1 mt-1">
                         <MapPin size={10} /> {selectedPoint.memoryCtx.placeName}
@@ -813,6 +1107,66 @@ export default function PlaybackPage() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* AI Route Coach card */}
+        {displayPoints.length >= 1 && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <button
+              onClick={() => setShowCoach((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-primary-50 flex items-center justify-center">
+                  <TrendingUp size={13} className="text-primary-500" />
+                </div>
+                <p className="text-xs font-black text-gray-700">AI Route Coach</p>
+                <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium">
+                  rule-based
+                </span>
+              </div>
+              <ChevronRight
+                size={14}
+                className={`text-gray-400 transition-transform ${showCoach ? 'rotate-90' : ''}`}
+              />
+            </button>
+
+            <AnimatePresence>
+              {showCoach && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="overflow-hidden"
+                >
+                  <div className="px-4 pb-4 space-y-2 border-t border-gray-50 pt-3">
+                    {coachHints.map((hint, i) => (
+                      <div
+                        key={i}
+                        className={`flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs ${
+                          hint.level === 'warning'
+                            ? 'bg-amber-50 text-amber-800'
+                            : hint.level === 'ok'
+                            ? 'bg-emerald-50 text-emerald-800'
+                            : 'bg-blue-50 text-blue-800'
+                        }`}
+                      >
+                        {hint.level === 'warning' ? (
+                          <AlertTriangle size={12} className="flex-shrink-0 mt-0.5 text-amber-600" />
+                        ) : hint.level === 'ok' ? (
+                          <CheckCircle2 size={12} className="flex-shrink-0 mt-0.5 text-emerald-600" />
+                        ) : (
+                          <Info size={12} className="flex-shrink-0 mt-0.5 text-blue-600" />
+                        )}
+                        {hint.text}
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
 
       </motion.div>
     </AppShell>
