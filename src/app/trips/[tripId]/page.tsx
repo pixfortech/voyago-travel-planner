@@ -337,6 +337,16 @@ export default function TripOverviewPage() {
                 </div>
               )}
 
+              <Link href={`/trips/${tripId}/location`}>
+                <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-emerald-200 hover:-translate-y-0.5 transition-all cursor-pointer">
+                  <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center mb-3 shadow-sm shadow-emerald-500/20">
+                    <MapPin size={20} className="text-white" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-sm">Travel History</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Check-ins & tracking</p>
+                </div>
+              </Link>
+
               <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative overflow-hidden opacity-70">
                 <div className="absolute top-2.5 right-2.5">
                   <span className="inline-flex items-center gap-1 bg-primary-100 text-primary-600 text-[10px] font-black px-2 py-0.5 rounded-full">
@@ -450,6 +460,19 @@ export default function TripOverviewPage() {
                   </div>
                   <span className="text-sm font-semibold text-gray-700 flex-1">Edit Trip</span>
                   <ChevronRight size={13} className="text-gray-300" />
+                </Link>
+
+                <Link
+                  href={`/trips/${tripId}/location`}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-emerald-50 group transition-colors"
+                >
+                  <div className="w-7 h-7 bg-emerald-50 group-hover:bg-emerald-100 rounded-lg flex items-center justify-center transition-colors">
+                    <MapPin size={13} className="text-emerald-600" />
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700 group-hover:text-emerald-700 transition-colors flex-1">
+                    Travel History
+                  </span>
+                  <ChevronRight size={13} className="text-gray-300 group-hover:text-emerald-400 transition-colors" />
                 </Link>
 
                 <Link

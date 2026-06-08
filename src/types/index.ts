@@ -428,3 +428,33 @@ export interface RouteRequestPoint {
   lat: number
   lng: number
 }
+
+// ── Location Check-in & Travel History (Phase 7A) ────────────────────────
+//
+// TripLocationPoint stores a single GPS check-in or foreground live-tracking
+// point. Saved to trips/{tripId}/locations subcollection. Trip membership rules
+// protect reads/writes. Location permission is NEVER requested silently — only
+// when the user explicitly taps "Use current location" or "Start live tracking".
+
+export type LocationSource =
+  | 'manual_checkin'    // user tapped "Save check-in" after viewing current GPS
+  | 'live_tracking'     // saved automatically during active foreground tracking
+
+export interface TripLocationPoint {
+  id: string
+  tripId: string
+  userId: string
+  latitude: number
+  longitude: number
+  accuracy?: number           // metres, from GeolocationCoordinates.accuracy
+  altitude?: number | null
+  heading?: number | null
+  speed?: number | null
+  capturedAt: string          // ISO timestamp of when the GPS fix was taken
+  timezone?: string           // e.g. "Asia/Kolkata"
+  source: LocationSource
+  label?: string              // user-typed label, e.g. "Taj Mahal gate"
+  note?: string               // free-text note
+  dayKey?: string             // YYYY-MM-DD — set at write time for day grouping
+  createdAt: string           // ISO timestamp of Firestore write
+}

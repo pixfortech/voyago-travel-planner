@@ -26,6 +26,7 @@ import type {
   Share,
   ShareVisibility,
   SharedTripSnapshot,
+  TripLocationPoint,
 } from '@/types'
 import { generateTripColor, generateId, getDatesInRange } from './utils'
 import { generateShareToken } from './share'
@@ -315,3 +316,33 @@ export async function deleteShare(shareId: string): Promise<void> {
     // Best-effort cleanup of the old token; ignore if already gone.
   }
 }
+
+// ── Location points (Phase 7A) ────────────────────────────────────────────
+//
+// Stored in trips/{tripId}/locations — trip membership rules apply (see
+// firestore.rules wildcard match). Permission is requested only when the user
+// explicitly triggers a check-in or starts foreground live tracking.
+
+export async function addLocationPoint(
+  tripId: string,
+  data: Omit<TripLocationPoint, 'id' | 'createdAt'>
+): Promise<TripLocationPoint> {
+  const now = new Date().toISOString()
+  const ref = await addDoc(collection(db, 'trips', tripId, 'locations'), {
+    ...pruneUndefined(data),
+    createdAt: now,
+  })
+  return { ...data, id: ref.id, createdAt: now }
+}
+
+export async function getLocationPoints(tripId: string): Promise<TripLocationPoint[]> {
+  const snap = await getDocs(
+    query(collection(db, 'trips', tripId, 'locations'), orderBy('capturedAt', 'desc'))
+  )
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TripLocationPoint)
+}
+
+export async function deleteLocationPoint(tripId: string, locationId: string): Promise<void> {
+  await deleteDoc(doc(db, 'trips', tripId, 'locations', locationId))
+}
+
