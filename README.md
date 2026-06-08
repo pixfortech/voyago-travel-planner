@@ -499,6 +499,55 @@ WebP, and HEIC/HEIF (HEIC may upload without a browser preview), max **15 MB**.
 
 ---
 
+## Route Playback (Phase 7C)
+
+The **Route Playback** page (`/trips/{tripId}/playback`) merges all location-tagged
+data from a trip into an animated, day-wise timeline:
+
+| Source | What is used |
+| ------ | ------------ |
+| **Travel History** | All check-ins and foreground live-tracking points |
+| **Itinerary activities** | Activities that have Google Maps place coordinates (Phase 6) |
+| **Photo memories** | Memories with GPS metadata attached (Phase 7B) |
+
+Points from all three sources are merged, sorted chronologically, and grouped by
+day. Nothing new is persisted — the playback dataset is derived in-memory.
+
+### What it does
+
+- **Day tabs**: filter to any day that has location data; use the prev/next arrows
+  or tap a tab.
+- **SVG route map**: a north-up flat projection of the day's GPS points connected
+  by a dashed line. No map tiles, no API key needed. The traveled segment turns
+  teal as playback advances. The active point shows a CSS pulse ring.
+- **Play / Pause / Resume / Reset**: animate through points at 1×, 2×, or 4×
+  speed (cycle with the ⚡ button). Points are highlighted sequentially on both
+  the map and the timeline.
+- **Timeline**: a scrollable list of all points for the selected day; click any
+  point to jump to it. The active item auto-scrolls into view during playback.
+- **Selected-point detail card**: shows context — check-in label/note/accuracy,
+  activity category/time/place, or memory thumbnail/place.
+- **Stats**: total points, approximate distance (Haversine, ±0.5%), days tracked.
+- **Empty state**: if there is no location data, explains the three ways to add
+  location data and links to each feature.
+
+### Map rendering
+
+The current implementation uses a pure SVG flat projection — **no Google Maps
+JavaScript SDK, no map tiles, no additional API key**. Route playback works in
+every environment. If you later add in-browser Google Maps rendering (e.g. the
+Maps JS SDK Embed), you can replace the `RouteSvg` component without touching the
+playback data model.
+
+### Privacy
+
+Route playback data is **private to trip members** and is **not included** in
+public share snapshots. Background tracking is not implemented — all location
+data originates from user-triggered check-ins, foreground tracking, activity
+place search, or memory uploads.
+
+---
+
 ## Scripts
 
 | Command         | Description                          |

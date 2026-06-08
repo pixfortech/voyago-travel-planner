@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import {
   MapPin, Calendar, Users, Wallet, Map, Pencil, Trash2, Share2,
   Sparkles, Camera, Lock, Plus, ChevronRight, CheckCircle2, Circle,
-  TrendingUp, UserPlus, Navigation,
+  TrendingUp, UserPlus, Navigation, Play,
 } from 'lucide-react'
 import { getTrip, deleteTrip, getExpenses, getMemories } from '@/lib/firestore'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
@@ -358,6 +358,16 @@ export default function TripOverviewPage() {
                   <p className="text-xs text-gray-400 mt-0.5">Photos & moments</p>
                 </div>
               </Link>
+
+              <Link href={`/trips/${tripId}/playback`}>
+                <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-primary-200 hover:-translate-y-0.5 transition-all cursor-pointer">
+                  <div className="w-10 h-10 bg-gradient-to-br from-slate-600 to-primary-600 rounded-xl flex items-center justify-center mb-3 shadow-sm shadow-slate-500/20">
+                    <Play size={20} className="text-white" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-sm">Route Playback</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Animate your journey</p>
+                </div>
+              </Link>
             </div>
           </motion.div>
 
@@ -519,6 +529,19 @@ export default function TripOverviewPage() {
                     Memories
                   </span>
                   <ChevronRight size={13} className="text-gray-300 group-hover:text-rose-400 transition-colors" />
+                </Link>
+
+                <Link
+                  href={`/trips/${tripId}/playback`}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-primary-50 group transition-colors"
+                >
+                  <div className="w-7 h-7 bg-primary-50 group-hover:bg-primary-100 rounded-lg flex items-center justify-center transition-colors">
+                    <Play size={13} className="text-primary-600" />
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700 group-hover:text-primary-700 transition-colors flex-1">
+                    Route Playback
+                  </span>
+                  <ChevronRight size={13} className="text-gray-300 group-hover:text-primary-400 transition-colors" />
                 </Link>
 
                 <Link

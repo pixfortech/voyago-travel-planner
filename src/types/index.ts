@@ -499,3 +499,53 @@ export interface TripMemory {
   linkedActivityId?: string
   linkedLocationPointId?: string
 }
+
+// ── Route Playback (Phase 7C) ─────────────────────────────────────────────
+//
+// A unified, in-memory view built from all location-tagged data: Travel History
+// check-ins, itinerary activities with place coordinates (Phase 6), and photo
+// memories with GPS (Phase 7B). Never persisted — derived client-side only.
+// Not included in public share snapshots.
+
+export type PlaybackPointType = 'checkin' | 'live_tracking' | 'activity' | 'memory'
+
+export interface PlaybackPointActivityContext {
+  title: string
+  category?: ActivityCategory
+  startTime?: string
+  locationName?: string
+  placeName?: string
+}
+
+export interface PlaybackPointMemoryContext {
+  title?: string
+  photoUrl: string
+  placeName?: string
+  capturedAt?: string
+}
+
+export interface PlaybackPointLocationContext {
+  label?: string
+  note?: string
+  accuracy?: number
+  source: LocationSource
+  capturedAt: string
+}
+
+/** Normalised, type-safe point on the route playback timeline. */
+export interface PlaybackPoint {
+  id: string
+  type: PlaybackPointType
+  label: string
+  timestamp: string                           // ISO — sort key and display
+  latitude: number
+  longitude: number
+  accuracy?: number
+  dayKey: string                              // YYYY-MM-DD
+  linkedActivityId?: string
+  linkedMemoryId?: string
+  linkedLocationPointId?: string
+  activityCtx?: PlaybackPointActivityContext
+  memoryCtx?: PlaybackPointMemoryContext
+  locationCtx?: PlaybackPointLocationContext
+}
