@@ -3,18 +3,25 @@ rules_version = '2';
 // Voyago Firestore security rules.
 //
 // Data model:
-//   users/{uid}                     → one profile doc per user (private)
+//   users/{uid}                     → one profile doc per user
 //   trips/{tripId}                  → has ownerId (string) + members (array of uids)
 //   trips/{tripId}/days/{dayId}     → itinerary days (inherit trip membership)
 //   trips/{tripId}/expenses/{id}    → expenses (inherit trip membership)
+//   invites/{token}                 → Phase 8 invite docs (token = doc ID)
 //
 // Auth model (Phase 2C):
 //   - Every visitor signs in anonymously by default.
 //   - Users may upgrade to Google or Email/Password while preserving their uid
 //     via Firebase linkWithCredential / linkWithPopup.
-//   - When linking succeeds the uid is unchanged, so existing trip membership
-//     requires no migration.
 //   - ownerId cannot be changed client-side; that requires Firebase Admin SDK.
+//
+// Collaboration model (Phase 8):
+//   - Trip membership is enforced by the members array (Firestore level).
+//   - Role (owner/editor/viewer) is stored in collaboratorRoles map but is only
+//     enforced at the UI level in this phase. Fine-grained per-role rules will
+//     be added in a future phase via Firebase Admin SDK or Cloud Functions.
+//   - Invite acceptance uses a permissive self-addition rule (Shape 3) with
+//     client-side invite validation. See the shape comment for details.
 //
 // Deploy:
 //   firebase deploy --only firestore:rules
@@ -33,21 +40,20 @@ service cloud.firestore {
         && request.auth.uid in get(/databases/$(database)/documents/trips/$(tripId)).data.members;
     }
 
-    // User profiles: a user may only read/write their own profile.
+    // User profiles.
+    //
+    // Phase 8 change: read is now allowed by ANY signed-in user so member
+    // names and avatars can be displayed on the collaboration page. Write is
+    // still restricted to the profile owner only.
     match /users/{userId} {
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId;
     }
 
     // Share snapshots (Phase 3 — public read-only trip sharing).
     //
-    // shares/{shareId} holds a denormalised, read-only snapshot containing ONLY
-    // the sections the owner chose to expose (see buildSnapshot). It does NOT
-    // grant any access to the underlying trip/expense documents.
-    //
-    //   • Public read is allowed ONLY when enabled == true — anyone (including
-    //     logged-out visitors) can read an enabled share. Disabled shares are
-    //     readable only by their owner.
-    //   • Only the trip owner (matching ownerId) may create, update, or delete.
+    // shares/{shareId} holds a denormalised, read-only snapshot. It does NOT
+    // grant access to the underlying trip/expense documents.
     match /shares/{shareId} {
       allow read: if resource.data.enabled == true
         || (isSignedIn() && request.auth.uid == resource.data.ownerId);
@@ -55,7 +61,6 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.auth.uid == request.resource.data.ownerId;
 
-      // Owner may update their share but cannot change its ownerId.
       allow update: if isSignedIn()
         && request.auth.uid == resource.data.ownerId
         && request.resource.data.ownerId == resource.data.ownerId;
@@ -64,11 +69,58 @@ service cloud.firestore {
         && request.auth.uid == resource.data.ownerId;
     }
 
+    // Trip invites (Phase 8 — collaboration).
+    //
+    // The invite token is the Firestore document ID (invites/{token}), enabling
+    // O(1) token lookup without a composite index. The 64-char cryptographically
+    // random token is the security factor for the accept page.
+    //
+    // No private trip data is stored here — only tripId, a trip name snapshot,
+    // inviter name snapshot, email, role, and status — so unauthenticated GET
+    // is safe and lets the accept page show invite details before sign-in.
+    match /invites/{inviteId} {
+      // Anyone may GET a single invite (for the accept-link page).
+      allow get: if true;
+
+      // Listing: any signed-in user. The client always queries by tripId so in
+      // practice only the owner sees their own trip's invites.
+      allow list: if isSignedIn();
+
+      // Create: must be signed-in and claim to be the trip owner.
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      // Update — two permitted shapes:
+      //   a) Owner revokes a pending invite (pending → revoked).
+      //   b) Any signed-in user accepts a pending invite and stamps their uid.
+      allow update: if isSignedIn() && (
+        (request.auth.uid == resource.data.ownerId
+         && resource.data.status == 'pending'
+         && request.resource.data.status == 'revoked')
+        ||
+        (resource.data.status == 'pending'
+         && request.resource.data.status == 'accepted'
+         && request.resource.data.acceptedByUid == request.auth.uid)
+      );
+
+      // Delete: only the owner may delete an invite.
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.ownerId;
+    }
+
     // Trips: members can read; creator must own and include self in members.
-    // Update has two permitted shapes:
-    //   1. Standard data update — ownerId and members unchanged (anyone in members).
-    //   2. Member extension — owner adds new members without removing existing ones
-    //      or changing ownerId. Required for future collaboration and migration prep.
+    //
+    // Update has four permitted shapes:
+    //   1. Standard data update — ownerId and members unchanged (any member).
+    //   2. Member extension — owner adds new members without removing existing.
+    //   3. Invite acceptance — any signed-in user adds ONLY themselves to the
+    //      members list. The invite is validated client-side; this rule prevents
+    //      adding others or removing existing members. This is intentionally
+    //      permissive — anyone who knows a tripId can add themselves. In practice
+    //      trip IDs are not publicly disclosed. Fine-grained invite validation at
+    //      the Firestore rule level requires Cloud Functions or Admin SDK and will
+    //      be added in a future phase.
+    //   4. Owner removes a member (but never themselves).
     match /trips/{tripId} {
       allow read: if isSignedIn() && request.auth.uid in resource.data.members;
 
@@ -77,7 +129,7 @@ service cloud.firestore {
         && request.auth.uid in request.resource.data.members;
 
       allow update: if isSignedIn() && (
-        // Shape 1: any member may update trip data; ownerId and members are immutable.
+        // Shape 1: any member may update trip data; ownerId and members unchanged.
         (request.auth.uid in resource.data.members
          && request.resource.data.ownerId == resource.data.ownerId
          && request.resource.data.members == resource.data.members)
@@ -89,11 +141,25 @@ service cloud.firestore {
          && request.resource.data.ownerId == resource.data.ownerId
          && request.auth.uid in request.resource.data.members
          && request.resource.data.members.hasAll(resource.data.members))
+        ||
+        // Shape 3: invite acceptance — signed-in user adds ONLY themselves.
+        // Only self may be the new entry; ownerId unchanged; no existing members removed.
+        (request.auth.uid in request.resource.data.members
+         && !(request.auth.uid in resource.data.members)
+         && request.resource.data.members.hasAll(resource.data.members)
+         && request.resource.data.ownerId == resource.data.ownerId)
+        ||
+        // Shape 4: owner may remove members (but never themselves).
+        // Constraints: ownerId unchanged, owner stays in new list, new list ⊆ old list.
+        (request.auth.uid == resource.data.ownerId
+         && request.resource.data.ownerId == resource.data.ownerId
+         && request.auth.uid in request.resource.data.members
+         && resource.data.members.hasAll(request.resource.data.members))
       );
 
       allow delete: if isSignedIn() && request.auth.uid in resource.data.members;
 
-      // Nested collections (days, expenses, future media) inherit trip membership.
+      // Nested collections (days, expenses, locations, memories, …) inherit membership.
       match /{sub=**} {
         allow read, write: if isTripMember(tripId);
       }

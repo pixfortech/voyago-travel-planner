@@ -385,6 +385,45 @@ export default function TripOverviewPage() {
         {/* ── Sidebar ── */}
         <div className="space-y-4">
 
+          {/* Members / Collaboration card */}
+          <motion.div {...fadeUp(0.06)}>
+            <Link href={`/trips/${tripId}/members`}>
+              <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-violet-200 transition-all group cursor-pointer">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-wide group-hover:text-violet-600 transition-colors">
+                    Collaboration
+                  </p>
+                  <span className="text-[11px] font-semibold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full group-hover:bg-violet-100 transition-colors">
+                    Manage →
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex -space-x-1.5">
+                    {Array.from({ length: Math.min(trip.members.length, 3) }, (_, i) => (
+                      <div
+                        key={i}
+                        className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-400 to-primary-500 border-2 border-white flex items-center justify-center text-white text-[9px] font-bold"
+                      >
+                        {i + 1}
+                      </div>
+                    ))}
+                    {trip.members.length > 3 && (
+                      <div className="w-7 h-7 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center text-gray-500 text-[9px] font-bold">
+                        +{trip.members.length - 3}
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700">
+                    {trip.members.length} member{trip.members.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1.5">
+                  Invite collaborators &amp; manage roles
+                </p>
+              </div>
+            </Link>
+          </motion.div>
+
           {/* Travellers */}
           <motion.div {...fadeUp(0.08)}>
             <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
@@ -555,15 +594,18 @@ export default function TripOverviewPage() {
                   <ChevronRight size={13} className="text-gray-300" />
                 </Link>
 
-                <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl opacity-50 cursor-not-allowed">
-                  <div className="w-7 h-7 bg-gray-50 rounded-lg flex items-center justify-center">
-                    <UserPlus size={13} className="text-gray-400" />
+                <Link
+                  href={`/trips/${tripId}/members`}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-50 group transition-colors"
+                >
+                  <div className="w-7 h-7 bg-violet-50 group-hover:bg-violet-100 rounded-lg flex items-center justify-center transition-colors">
+                    <UserPlus size={13} className="text-violet-600" />
                   </div>
-                  <span className="text-sm font-semibold text-gray-400 flex-1">Invite Members</span>
-                  <span className="text-[10px] font-black text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                    Soon
+                  <span className="text-sm font-semibold text-gray-700 group-hover:text-violet-700 transition-colors flex-1">
+                    Invite Members
                   </span>
-                </div>
+                  <ChevronRight size={13} className="text-gray-300 group-hover:text-violet-400 transition-colors" />
+                </Link>
               </div>
             </div>
           </motion.div>

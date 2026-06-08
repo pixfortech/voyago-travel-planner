@@ -43,8 +43,56 @@ export interface Trip {
   travellers?: Traveller[]
   /** Token pointing at the current shares/{shareId} document, if sharing was ever set up. */
   shareId?: string
+  /**
+   * Role map for Phase 8 collaboration (uid → TripRole). Absent on pre-Phase 8
+   * trips (all have only the owner in members) — backward compatible.
+   * The owner's role is always inferred from ownerId, not this map.
+   */
+  collaboratorRoles?: Record<string, TripRole>
   createdAt: string
   updatedAt: string
+}
+
+// ── Collaboration (Phase 8) ────────────────────────────────────────────────
+
+/**
+ * Member role within a trip.
+ *   owner  — created the trip; can manage members, invites, and all data.
+ *   editor — can view and edit itinerary, budget, expenses, memories, and routes.
+ *   viewer — read-only; cannot edit (enforced at the UI layer; membership itself
+ *            is enforced by Firestore rules via the members array).
+ *
+ * NOTE: Firestore security rules enforce membership (members array) but not
+ * fine-grained per-role write access. viewer/editor distinction is enforced
+ * in the client UI. Server-side per-role Firestore rules will be added in a
+ * future phase via Firebase Admin SDK or Cloud Functions.
+ */
+export type TripRole = 'owner' | 'editor' | 'viewer'
+
+export type TripInviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired'
+
+/**
+ * An invitation to join a trip. Stored in the top-level `invites` collection
+ * as `invites/{token}` — the token IS the document ID, enabling O(1) lookup by
+ * URL without knowing the tripId. The token is a 64-char cryptographically
+ * random hex string; guessing it is infeasible.
+ *
+ * Only non-sensitive trip information is stored here (name snapshot, role) so
+ * the accept page can display invite details before the user is authenticated.
+ */
+export interface TripInvite {
+  id: string              // same as the Firestore doc ID (= token)
+  tripId: string
+  tripName: string        // denormalized snapshot; shown on accept page
+  ownerId: string
+  inviterName: string     // denormalized snapshot
+  email: string           // invitee email, lowercase
+  role: 'editor' | 'viewer'  // cannot invite as 'owner'
+  status: TripInviteStatus
+  createdAt: string       // ISO
+  expiresAt: string       // ISO, 7 days after createdAt
+  acceptedAt?: string
+  acceptedByUid?: string
 }
 
 export type ActivityType = 'hotel' | 'transport' | 'activity' | 'food' | 'other'

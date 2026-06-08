@@ -1,13 +1,19 @@
 'use client'
 
-import { type FormEvent, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { type FormEvent, Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Loader, Sparkles } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import type { AuthResult } from '@/lib/auth'
+
+/** Only allow relative paths that start with '/' to prevent open-redirect. */
+function safeReturnUrl(raw: string | null): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/dashboard'
+  return raw
+}
 
 function GoogleIcon() {
   return (
@@ -22,8 +28,11 @@ function GoogleIcon() {
 
 type Mode = 'signup' | 'signin'
 
-export default function AuthPage() {
+function AuthPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const returnUrl = safeReturnUrl(searchParams.get('returnUrl'))
+
   const { user, isAnonymous, signInWithGoogle, signUpWithEmail, signInWithEmail } = useApp()
 
   const [mode, setMode] = useState<Mode>('signup')
@@ -34,12 +43,12 @@ export default function AuthPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
-  // Already signed in → go to dashboard
+  // Already signed in → go to returnUrl or dashboard
   useEffect(() => {
     if (user && !user.isAnonymous) {
-      router.replace('/dashboard')
+      router.replace(returnUrl)
     }
-  }, [user, router])
+  }, [user, router, returnUrl])
 
   function switchMode(next: Mode) {
     setMode(next)
@@ -52,7 +61,7 @@ export default function AuthPage() {
     const result: AuthResult = await signInWithGoogle()
     setBusy(null)
     if (result.success) {
-      router.replace('/dashboard')
+      router.replace(returnUrl)
     } else if (result.error !== 'popup-closed') {
       setError(result.errorMessage ?? 'Sign in failed.')
     }
@@ -80,7 +89,7 @@ export default function AuthPage() {
     setBusy(null)
 
     if (result.success) {
-      router.replace('/dashboard')
+      router.replace(returnUrl)
     } else {
       setError(result.errorMessage ?? 'Something went wrong.')
       // If "email already in use" on signup, nudge them to sign in
@@ -228,5 +237,19 @@ export default function AuthPage() {
         Continue as guest →
       </Link>
     </div>
+  )
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-teal-50 flex items-center justify-center">
+          <div className="w-8 h-8 border-4 border-primary-200 border-t-primary-500 rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <AuthPageInner />
+    </Suspense>
   )
 }
