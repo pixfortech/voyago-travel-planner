@@ -382,8 +382,8 @@ All Google calls happen in server API routes, so the key stays server-side:
 
 | Var | Scope | Purpose |
 | --- | ----- | ------- |
-| `GOOGLE_MAPS_API_KEY` | **server-only** (recommended) | Place search + route estimates |
-| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | public (optional) | Reserved for future in-browser map rendering; the server falls back to it if the server-only key is unset |
+| `GOOGLE_MAPS_API_KEY` | **server-only** (recommended) | Place search + route estimates + route optimisation (Routes API) |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | public (optional) | Renders the real Google Maps canvas on Route Playback (Phase 7E); the server also falls back to it for server calls if the server-only key is unset |
 
 ```bash
 # .env.local — enable maps locally
@@ -563,6 +563,66 @@ manual reorder. The endpoint is rate-limited to 10 requests per IP per minute.
 
 ---
 
+## Real Google Maps canvas (Phase 7E)
+
+Route Playback can render an **actual Google Maps canvas** with coloured markers
+and the exact road route, on top of everything from Phases 7C/7D. It is fully
+**optional** — without the browser key the page uses the SVG route fallback and
+nothing breaks.
+
+### Browser key required for the map
+
+The map canvas is the **only** place the browser loads Google Maps, and it needs
+the PUBLIC key:
+
+```bash
+# .env.local
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...   # browser key, restricted by referrer
+```
+
+- Enable the **Maps JavaScript API** for this key in Google Cloud Console.
+- Restrict it by **HTTP referrer** (your website domains, e.g. `localhost:3000/*`
+  and your production domain) and to the **Maps JavaScript API** only.
+- Keep it **separate** from the server-only `GOOGLE_MAPS_API_KEY`, which is used
+  for the Routes/Places API server calls and is never exposed to the browser.
+
+The Maps JS SDK is loaded **lazily** — only on the Route Playback page, only in
+the browser, only when the key is present, and only once (a singleton loader
+guards against duplicate `<script>` injection). It is never loaded globally.
+
+### What the map does
+
+- **Markers** for every point — colour-coded by type (check-in, live tracking,
+  activity, memory) and numbered in visit order. The map auto-fits bounds to all
+  visible points for the selected day.
+- **Two-way selection sync**: clicking a marker selects that timeline point (and
+  opens an info window with its title, type, time, and place/note); clicking a
+  timeline point highlights and pans to its marker.
+- **Playback sync**: Play/Pause/Reset drive the active marker, which enlarges,
+  bounces, and the map gently pans to it — without jarring zoom changes.
+- **Exact road polyline**: after you run *Optimise via Google Routes* and apply
+  the optimised order, the map draws the exact road route returned by the Routes
+  API (decoded from its encoded polyline). A **“Google Maps · road route”** badge
+  indicates this.
+- **Approximate path**: before optimisation, or after a manual reorder that no
+  longer matches the optimised order, the map draws a dashed straight-line path
+  and shows **“Google Maps · approx. line”**. The road polyline returns once the
+  displayed order matches a Routes API result again.
+
+### Fallback behaviour
+
+| Situation | What renders | Badge |
+| --------- | ------------ | ----- |
+| No browser key | SVG route (Phase 7C) | *Approximate SVG fallback* |
+| Maps JS fails to load | SVG route (auto fallback) | *Approximate SVG fallback* |
+| Key set, map loaded, optimised order applied | Google Map + road polyline | *Google Maps · road route* |
+| Key set, map loaded, order not yet optimised | Google Map + dashed line | *Google Maps · approx. line* |
+
+No raw Google API responses are stored — only the small encoded polyline string
+needed to draw the route, decoded in memory on the client and never persisted.
+
+---
+
 ## Route Playback (Phase 7C)
 
 The **Route Playback** page (`/trips/{tripId}/playback`) merges all location-tagged
@@ -597,11 +657,12 @@ day. Nothing new is persisted — the playback dataset is derived in-memory.
 
 ### Map rendering
 
-The current implementation uses a pure SVG flat projection — **no Google Maps
-JavaScript SDK, no map tiles, no additional API key**. Route playback works in
-every environment. If you later add in-browser Google Maps rendering (e.g. the
-Maps JS SDK Embed), you can replace the `RouteSvg` component without touching the
-playback data model.
+The Phase 7C implementation uses a pure SVG flat projection — **no Google Maps
+JavaScript SDK, no map tiles, no additional API key**. It works in every
+environment and remains the automatic fallback. Phase 7E adds an **optional**
+real Google Maps canvas on top (see *Real Google Maps canvas* above); when the
+browser key is absent or the SDK fails to load, the page falls back to this SVG
+renderer without any change to the playback data model.
 
 ### Privacy
 

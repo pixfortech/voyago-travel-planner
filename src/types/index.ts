@@ -583,5 +583,11 @@ export interface OptimiseRouteResult {
   optimisedRouteDistanceMeters: number
   /** Exact road travel time for the optimised order via Google Routes API (seconds). */
   optimisedRouteDurationSeconds: number
+  /**
+   * Encoded polyline (Google's algorithm) of the exact road route for the
+   * optimised order, when the Routes API returned one. Decoded client-side and
+   * drawn on the Google Maps canvas (Phase 7E). Absent when unavailable.
+   */
+  routePolyline?: string
   warnings: string[]
 }

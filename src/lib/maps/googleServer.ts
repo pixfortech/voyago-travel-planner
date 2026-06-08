@@ -134,8 +134,17 @@ interface RoutesApiLeg {
 }
 
 interface RoutesApiResponse {
-  routes?: Array<{ legs?: RoutesApiLeg[] }>
+  routes?: Array<{
+    legs?: RoutesApiLeg[]
+    polyline?: { encodedPolyline?: string }
+  }>
   error?: { code?: number; message?: string }
+}
+
+/** Legs plus the optional encoded road polyline for the whole route. */
+interface RoutesApiResult {
+  legs: RoutesApiLeg[]
+  encodedPolyline: string | null
 }
 
 function formatDistance(meters: number): string {
@@ -160,7 +169,11 @@ function parseDurationSeconds(dur?: string): number {
 
 /**
  * Call Google Routes API computeRoutes for an ordered list of lat/lng points.
- * Returns legs in order (origin→waypoint1, waypoint1→waypoint2, …, waypointN→destination).
+ * Returns legs in order (origin→waypoint1, …, waypointN→destination) plus the
+ * encoded road polyline for the whole route (when Google provides one).
+ *
+ * The routing preference is mode-dependent: TRANSIT/WALK do not support
+ * TRAFFIC_AWARE, so we only request it (when needed) for DRIVE.
  *
  * Throws on auth or transport failure. On a per-leg routing failure the leg will
  * have zero distanceMeters/duration — callers flag these as !ok.
@@ -168,7 +181,7 @@ function parseDurationSeconds(dur?: string): number {
 async function fetchRoutesApiLegs(
   points: Array<{ lat: number; lng: number }>,
   travelMode: TravelMode,
-): Promise<RoutesApiLeg[]> {
+): Promise<RoutesApiResult> {
   const key = getServerMapsKey()
   if (points.length < 2) throw new Error('not_enough_points')
 
@@ -180,9 +193,15 @@ async function fetchRoutesApiLegs(
     origin: toWaypoint(points[0]!),
     destination: toWaypoint(points[points.length - 1]!),
     travelMode: TRAVEL_MODE_MAP[travelMode],
-    routingPreference: 'TRAFFIC_UNAWARE',
     computeAlternativeRoutes: false,
     units: 'METRIC',
+    // Overview-level polyline keeps the response (and decode cost) small.
+    polylineQuality: 'OVERVIEW',
+  }
+
+  // routingPreference is only valid for DRIVE/TWO_WHEELER in the Routes API.
+  if (travelMode === 'driving') {
+    body.routingPreference = 'TRAFFIC_UNAWARE'
   }
 
   if (points.length > 2) {
@@ -196,7 +215,8 @@ async function fetchRoutesApiLegs(
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': key,
-        'X-Goog-FieldMask': 'routes.legs.distanceMeters,routes.legs.duration',
+        'X-Goog-FieldMask':
+          'routes.legs.distanceMeters,routes.legs.duration,routes.polyline.encodedPolyline',
       },
       body: JSON.stringify(body),
       cache: 'no-store',
@@ -211,7 +231,11 @@ async function fetchRoutesApiLegs(
   const data = (await res.json()) as RoutesApiResponse
   if (data.error?.code) throw new Error(`maps_routes_error_${data.error.code}`)
 
-  return data.routes?.[0]?.legs ?? []
+  const route = data.routes?.[0]
+  return {
+    legs: route?.legs ?? [],
+    encodedPolyline: route?.polyline?.encodedPolyline ?? null,
+  }
 }
 
 // ── Routes API — sequential day route (replaces legacy Distance Matrix) ─────
@@ -230,7 +254,7 @@ export async function computeDayRoute(
   if (points.length < 2) throw new Error('not_enough_points')
 
   const coords = points.map((p) => ({ lat: p.lat, lng: p.lng }))
-  const apiLegs = await fetchRoutesApiLegs(coords, travelMode)
+  const { legs: apiLegs } = await fetchRoutesApiLegs(coords, travelMode)
 
   const legs: RouteLeg[] = []
   let totalDistance = 0
@@ -366,14 +390,16 @@ export async function computeOptimisedRoute(
 
   let routeDistMeters = 0
   let routeDurSeconds = 0
+  let encodedPolyline: string | null = null
   const warnings: string[] = []
 
   try {
-    const apiLegs = await fetchRoutesApiLegs(coords, travelMode)
+    const { legs: apiLegs, encodedPolyline: poly } = await fetchRoutesApiLegs(coords, travelMode)
     for (const leg of apiLegs) {
       routeDistMeters += leg.distanceMeters ?? 0
       routeDurSeconds += parseDurationSeconds(leg.duration)
     }
+    encodedPolyline = poly
   } catch {
     warnings.push('Exact road times unavailable — showing straight-line estimates only.')
   }
@@ -407,6 +433,7 @@ export async function computeOptimisedRoute(
     optimisedHaversineMeters: Math.round(optimisedHaversine),
     optimisedRouteDistanceMeters: Math.round(routeDistMeters),
     optimisedRouteDurationSeconds: routeDurSeconds,
+    ...(encodedPolyline ? { routePolyline: encodedPolyline } : {}),
     warnings,
   }
 }

@@ -12,6 +12,8 @@ import { getTrip, getItineraryDays, getLocationPoints, getMemories } from '@/lib
 import { buildPlaybackPoints, groupPlaybackByDay } from '@/lib/location/playback'
 import { computeTripDistance } from '@/lib/location/distance'
 import AppShell from '@/components/layout/AppShell'
+import RouteGoogleMap, { type MapRenderStatus } from '@/components/maps/RouteGoogleMap'
+import { isBrowserMapsConfigured } from '@/lib/maps/mapsLoader'
 import type {
   Trip, ItineraryDay, TripLocationPoint, TripMemory,
   PlaybackPoint, PlaybackPointType, OptimiseRouteResult,
@@ -349,6 +351,10 @@ export default function PlaybackPage() {
   const [mapsAvailable, setMapsAvailable] = useState(true)
   const [showCoach, setShowCoach] = useState(true)
 
+  // ── Google Maps canvas (Phase 7E) ─────────────────────────────────────
+  const browserMapsConfigured = isBrowserMapsConfigured()
+  const [mapStatus, setMapStatus] = useState<MapRenderStatus>('loading')
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
 
@@ -425,6 +431,19 @@ export default function PlaybackPage() {
 
   const selectedPoint: PlaybackPoint | null =
     currentIndex >= 0 ? (displayPoints[currentIndex] ?? null) : null
+
+  // The exact road polyline only matches the map when the displayed order is
+  // exactly the optimised order. After a manual reorder it goes stale, so we
+  // drop back to the straight-line approximation until the user re-optimises.
+  const currentOrderIds = useMemo(
+    () => displayPoints.map((p) => p.id).join('>'),
+    [displayPoints],
+  )
+  const polylineIsCurrent =
+    !!optimiseResult?.routePolyline &&
+    optimiseResult.optimisedOrder.join('>') === currentOrderIds
+  const activePolyline = polylineIsCurrent ? optimiseResult!.routePolyline! : null
+  const showGoogleMap = browserMapsConfigured && mapStatus !== 'error'
 
   const coachHints = useMemo(
     () => buildCoachHints(displayPoints, manualDayDistance.totalKm, optimiseResult),
@@ -721,13 +740,44 @@ export default function PlaybackPage() {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1 text-[10px] text-gray-400">
-                  <Info size={10} />
-                  Approx.
-                </div>
+                {showGoogleMap && mapStatus === 'ready' ? (
+                  polylineIsCurrent ? (
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                      Google Maps · road route
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary-500" />
+                      Google Maps · approx. line
+                    </div>
+                  )
+                ) : showGoogleMap && mapStatus === 'loading' ? (
+                  <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <Loader2 size={10} className="animate-spin" />
+                    Loading map…
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <Info size={10} />
+                    Approximate SVG fallback
+                  </div>
+                )}
               </div>
               <div className="px-2 pb-2">
-                <RouteSvg points={displayPoints} activeIndex={currentIndex} />
+                {showGoogleMap ? (
+                  <RouteGoogleMap
+                    points={displayPoints}
+                    activeIndex={currentIndex}
+                    onSelectPoint={(i) => { setCurrentIndex(i); setPlaying(false) }}
+                    encodedPolyline={activePolyline}
+                    colors={COLORS}
+                    labels={TYPE_LABELS}
+                    onStatusChange={setMapStatus}
+                  />
+                ) : (
+                  <RouteSvg points={displayPoints} activeIndex={currentIndex} />
+                )}
               </div>
             </div>
 
