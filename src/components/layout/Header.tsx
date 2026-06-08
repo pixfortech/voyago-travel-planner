@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import ProfileMenu from './ProfileMenu'
+import NotificationBell from './NotificationBell'
 
 interface HeaderProps {
   title?: string
@@ -36,6 +37,9 @@ export default function Header({ title, back, actions }: HeaderProps) {
 
         {/* Page-level actions (edit/share/delete on trip pages) */}
         {actions && <div className="flex items-center gap-0.5">{actions}</div>}
+
+        {/* Notification bell — signed-in non-anonymous users only */}
+        <NotificationBell />
 
         {/* Profile avatar + menu — always present */}
         <ProfileMenu />

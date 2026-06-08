@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Users, UserPlus, Copy, Check, X, ChevronDown,
   Mail, Clock, AlertTriangle, Info, Link as LinkIcon,
-  Shield, Eye, Pencil,
+  Shield, Eye, Pencil, Bell,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useApp } from '@/context/AppContext'
@@ -16,9 +16,9 @@ import {
   createInvite, getTripInvites, revokeInvite,
   removeTripMember, updateMemberRole, getMemberProfiles,
   getMemberRole, roleLabel, roleColor, roleDescription,
-  nameInitials, inviteUrl, effectiveStatus,
+  nameInitials, inviteUrl, effectiveStatus, linkTravellerToMember,
 } from '@/lib/collaboration'
-import type { Trip, TripInvite, TripRole, UserProfile } from '@/types'
+import type { Trip, TripInvite, TripRole, UserProfile, Traveller } from '@/types'
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -127,6 +127,7 @@ export default function MembersPage() {
   const [revoking, setRevoking] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const [roleChanging, setRoleChanging] = useState<string | null>(null)
+  const [linkingMember, setLinkingMember] = useState<string | null>(null)
 
   const isOwner = user?.uid === trip?.ownerId
 
@@ -238,6 +239,34 @@ export default function MembersPage() {
       // silently fail
     } finally {
       setRemoving(null)
+    }
+  }
+
+  async function handleLinkTraveller(memberUid: string, travellerIdOrNull: string | null) {
+    if (!trip || !isOwner) return
+    setLinkingMember(memberUid)
+    try {
+      await linkTravellerToMember(tripId, travellerIdOrNull, memberUid, trip)
+      setTrip((prev) => {
+        if (!prev) return prev
+        const travellers = (prev.travellers ?? []).map((t) => {
+          // Remove existing link for this member
+          if (t.userId === memberUid) {
+            const { userId: _removed, ...rest } = t
+            return rest as Traveller
+          }
+          // Set link on the chosen traveller
+          if (travellerIdOrNull && t.id === travellerIdOrNull) {
+            return { ...t, userId: memberUid }
+          }
+          return t
+        })
+        return { ...prev, travellers }
+      })
+    } catch {
+      // silently fail
+    } finally {
+      setLinkingMember(null)
     }
   }
 
@@ -623,6 +652,76 @@ export default function MembersPage() {
             </p>
           </div>
         </motion.div>
+
+        {/* Link travellers to member accounts (owner only, requires travellers + multiple members) */}
+        {isOwner && (trip.travellers ?? []).length > 0 && sortedMembers.length > 1 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.2 }}
+          >
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-50 flex items-center gap-2">
+                <Bell size={13} className="text-violet-500" />
+                <p className="text-xs font-black text-gray-400 uppercase tracking-wide">
+                  Tag Notifications
+                </p>
+              </div>
+              <div className="px-4 py-2.5 text-xs text-gray-500 leading-relaxed">
+                Link travellers to their accounts to enable in-app notifications when they&apos;re tagged in memories.
+              </div>
+              <div className="divide-y divide-gray-50">
+                {sortedMembers
+                  .filter((uid) => uid !== trip.ownerId)
+                  .map((uid) => {
+                    const p = profileFor(uid)
+                    const linkedTraveller = (trip.travellers ?? []).find((t) => t.userId === uid)
+                    const isLinking = linkingMember === uid
+                    return (
+                      <div key={uid} className="flex items-center gap-3 px-4 py-2.5">
+                        <Avatar profile={p} size={30} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-800 truncate">
+                            {p?.name ?? 'Unknown'}
+                          </p>
+                        </div>
+                        {isLinking ? (
+                          <span className="w-4 h-4 border-2 border-primary-200 border-t-primary-500 rounded-full animate-spin flex-shrink-0" />
+                        ) : (
+                          <div className="relative flex-shrink-0">
+                            <select
+                              value={linkedTraveller?.id ?? ''}
+                              onChange={(e) => handleLinkTraveller(uid, e.target.value || null)}
+                              disabled={isLinking}
+                              className="appearance-none bg-gray-50 border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 pl-2 pr-6 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-300 disabled:opacity-50"
+                            >
+                              <option value="">No link</option>
+                              {(trip.travellers ?? []).map((t) => (
+                                <option
+                                  key={t.id}
+                                  value={t.id}
+                                  disabled={!!t.userId && t.userId !== uid}
+                                >
+                                  {t.name}{t.userId === uid ? ' ✓' : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+              </div>
+              <div className="px-4 py-2 bg-gray-50/50 border-t border-gray-50 flex items-center gap-1.5">
+                <Info size={10} className="text-gray-400" />
+                <p className="text-[10px] text-gray-400">
+                  Linked travellers get a notification when tagged in a memory.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Back to trip */}
         <div className="pb-4">

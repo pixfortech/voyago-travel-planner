@@ -6,6 +6,8 @@ import type {
   SharedTripSnapshot,
   SharedDay,
   SharedTraveller,
+  SharedMemory,
+  TripMemory,
 } from '@/types'
 import { getDayCount } from './utils'
 import {
@@ -21,8 +23,8 @@ import {
 
 /**
  * Privacy-safe defaults: only the basic summary and itinerary are shown.
- * Budget, expense breakdown, settlement, and traveller list stay OFF until the
- * owner explicitly enables them. Notes are also off by default.
+ * Budget, expense breakdown, settlement, traveller list, and memories stay OFF
+ * until the owner explicitly enables them. Notes are also off by default.
  */
 export const DEFAULT_VISIBILITY: ShareVisibility = {
   itinerary: true,
@@ -31,6 +33,8 @@ export const DEFAULT_VISIBILITY: ShareVisibility = {
   expenseBreakdown: false,
   settlement: false,
   notes: false,
+  memories: false,
+  memoryOptions: { titles: true, tags: true, dayGrouping: true },
 }
 
 /** Generate an unguessable URL-safe share token (~22 chars of entropy). */
@@ -64,7 +68,8 @@ export function buildSnapshot(
   trip: Trip,
   expenses: Expense[],
   days: ItineraryDay[],
-  visibility: ShareVisibility
+  visibility: ShareVisibility,
+  memories?: TripMemory[]
 ): SharedTripSnapshot {
   const travellers = trip.travellers ?? []
   const travellerCount = Math.max(travellers.length, 1)
@@ -167,6 +172,37 @@ export function buildSnapshot(
   // ── Notes ──
   if (visibility.notes && trip.notes) {
     snapshot.notes = trip.notes
+  }
+
+  // ── Memories (safe public snapshot) ──
+  // Only included when the owner explicitly opts in. Precise GPS coordinates
+  // (location.latitude / location.longitude) are NEVER written to the snapshot.
+  // Only safe fields are included: photoUrl (Firebase download URL), title,
+  // description, uploadedAt, capturedAt, dayKey, placeName (user-entered label),
+  // and tagged traveller display names / initials / colours.
+  if (visibility.memories && memories && memories.length > 0) {
+    const opts = visibility.memoryOptions ?? { titles: true, tags: true, dayGrouping: true }
+    const sharedMemories: SharedMemory[] = memories.map((m) => {
+      const shared: SharedMemory = { photoUrl: m.photoUrl, uploadedAt: m.uploadedAt }
+      if (opts.titles && m.title) shared.title = m.title
+      if (opts.titles && m.description) shared.description = m.description
+      if (m.capturedAt) shared.capturedAt = m.capturedAt
+      if (opts.dayGrouping && m.dayKey) shared.dayKey = m.dayKey
+      // placeName is user-typed text — safe; never raw GPS lat/lng
+      if (m.placeName) shared.placeName = m.placeName
+      // Tagged travellers: strip to name/initials/color only — no uid, email, or GPS
+      if (opts.tags && m.taggedTravellerIds && m.taggedTravellerIds.length > 0) {
+        const tagged: SharedTraveller[] = []
+        for (const tid of m.taggedTravellerIds) {
+          const t = travellers.find((tv) => tv.id === tid)
+          if (t) tagged.push({ name: t.name, initials: t.initials, color: t.color })
+        }
+        if (tagged.length > 0) shared.taggedTravellers = tagged
+      }
+      return shared
+    })
+    snapshot.memories = sharedMemories
+    snapshot.memoryCount = sharedMemories.length
   }
 
   return snapshot

@@ -25,6 +25,8 @@ export interface Traveller {
   name: string
   color: string
   initials: string
+  /** Links this trip traveller to a registered user account. Used to route tag notifications. */
+  userId?: string
 }
 
 export interface Trip {
@@ -212,6 +214,16 @@ export interface Expense {
 // data even by reading the raw document. The live trip / expenses documents stay
 // private to members.
 
+/**
+ * Fine-grained control over which memory data is visible in the public share.
+ * Precise GPS coordinates are NEVER exposed regardless of these settings.
+ */
+export interface ShareMemoryVisibility {
+  titles: boolean      // include title + description text
+  tags: boolean        // include tagged traveller name/initials/color (no uid/email)
+  dayGrouping: boolean // group photos by day in the public gallery
+}
+
 export interface ShareVisibility {
   itinerary: boolean
   travellers: boolean
@@ -219,6 +231,10 @@ export interface ShareVisibility {
   expenseBreakdown: boolean
   settlement: boolean
   notes: boolean
+  /** Opt-in: false by default. When true, safe photo snapshots are included in the public share. */
+  memories: boolean
+  /** Sub-options controlling which memory metadata is shown publicly. */
+  memoryOptions?: ShareMemoryVisibility
 }
 
 export interface SharedActivity {
@@ -241,6 +257,24 @@ export interface SharedTraveller {
   name: string
   initials: string
   color: string
+}
+
+/**
+ * Public-safe memory snapshot. Contains ONLY safe fields — never storagePath,
+ * userId, or precise GPS coordinates. photoUrl is a Firebase Storage download URL
+ * which is already public (required to display the image in a browser).
+ */
+export interface SharedMemory {
+  photoUrl: string
+  title?: string
+  description?: string
+  uploadedAt: string
+  capturedAt?: string
+  dayKey?: string
+  /** User-entered place label — safe to share; never raw GPS coordinates. */
+  placeName?: string
+  /** Tagged travellers: name/initials/color only. No uid or email. */
+  taggedTravellers?: SharedTraveller[]
 }
 
 export interface SharedCategoryTotal {
@@ -289,6 +323,9 @@ export interface SharedTripSnapshot {
   vendorBreakdown?: SharedVendorTotal[]
   settlement?: SharedSettlement[]
   notes?: string
+  /** Public memory gallery — only present when owner opts in via share settings. */
+  memories?: SharedMemory[]
+  memoryCount?: number
 }
 
 export interface Share {
@@ -628,6 +665,30 @@ export interface OptimiseRoutePoint {
   name: string
   lat: number
   lng: number
+}
+
+// ── In-app notifications (Phase 9) ───────────────────────────────────────────
+//
+// Lightweight notification model stored in users/{uid}/notifications/{id}.
+// Only the recipient can read/update their own notifications (Firestore rules).
+// Trip members may create notifications for other members via the tag flow.
+// No push notifications or email in this phase — in-app bell only.
+
+export type NotificationType = 'memory_tagged'
+
+export interface InAppNotification {
+  id: string
+  userId: string        // recipient uid — matches the Firestore subcollection path
+  tripId: string
+  memoryId?: string
+  type: NotificationType
+  title: string
+  message: string
+  read: boolean
+  createdAt: string     // ISO
+  actorUid?: string     // who triggered the notification (uploader uid)
+  actorName?: string    // uploader display name (denormalised)
+  tripName?: string     // trip name (denormalised for display without extra fetch)
 }
 
 /** Result returned by POST /api/maps/route/optimise. */

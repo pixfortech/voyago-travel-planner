@@ -48,6 +48,18 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && request.auth.uid == userId;
+
+      // In-app notifications (Phase 9).
+      // Only the recipient may read, update (mark read), or delete their notifications.
+      // Any signed-in trip member may CREATE a notification for another user
+      // (e.g. memory tag events), provided they are a member of the referenced trip.
+      // This prevents notification spam by requiring tripId membership.
+      match /notifications/{notificationId} {
+        allow read, update, delete: if isSignedIn() && request.auth.uid == userId;
+        allow create: if isSignedIn()
+          && request.resource.data.userId == userId
+          && isTripMember(request.resource.data.tripId);
+      }
     }
 
     // Share snapshots (Phase 3 — public read-only trip sharing).

@@ -281,3 +281,35 @@ export function nameInitials(name: string): string {
 export function inviteUrl(token: string, origin: string): string {
   return `${origin}/invite/${token}`
 }
+
+// ── Traveller–account linking (Phase 9) ────────────────────────────────────
+
+/**
+ * Link a trip traveller to a member's user account, enabling tag notifications.
+ * Pass travellerId = null to unlink the member from any currently-linked traveller.
+ *
+ * Firestore rule: Shape 1 (standard data update — members/ownerId unchanged).
+ */
+export async function linkTravellerToMember(
+  tripId: string,
+  travellerId: string | null,
+  memberUid: string,
+  trip: Trip
+): Promise<void> {
+  const travellers = (trip.travellers ?? []).map((t) => {
+    // Remove any existing link for this member first
+    if (t.userId === memberUid) {
+      const { userId: _removed, ...rest } = t
+      return rest as typeof t
+    }
+    // Set the link on the chosen traveller
+    if (travellerId && t.id === travellerId) {
+      return { ...t, userId: memberUid }
+    }
+    return t
+  })
+  await updateDoc(doc(db, 'trips', tripId), {
+    travellers,
+    updatedAt: new Date().toISOString(),
+  })
+}

@@ -3,16 +3,29 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
-  MapPin, Calendar, Users, Wallet, Compass, Lock,
+  MapPin, Calendar, Users, Wallet, Compass, Lock, Camera, X, Clock,
 } from 'lucide-react'
 import { getShare } from '@/lib/firestore'
 import {
   formatDate, tripTypeLabel, formatCurrency,
   activityTypeIcon, expenseCategoryIcon, vendorTypeIcon, vendorTypeLabel,
 } from '@/lib/utils'
-import type { SharedTripSnapshot } from '@/types'
+import type { SharedTripSnapshot, SharedMemory } from '@/types'
+
+function groupMemoriesByDay(memories: SharedMemory[]): Array<{ dayKey: string; items: SharedMemory[] }> {
+  const map = new Map<string, SharedMemory[]>()
+  for (const m of memories) {
+    const key = m.dayKey ?? m.uploadedAt.slice(0, 10)
+    const arr = map.get(key) ?? []
+    arr.push(m)
+    map.set(key, arr)
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([dayKey, items]) => ({ dayKey, items }))
+}
 
 type LoadState = 'loading' | 'ready' | 'unavailable'
 
@@ -56,6 +69,7 @@ export default function SharedTripPage() {
   const { shareId } = useParams<{ shareId: string }>()
   const [state, setState] = useState<LoadState>('loading')
   const [snap, setSnap] = useState<SharedTripSnapshot | null>(null)
+  const [lightboxMemory, setLightboxMemory] = useState<SharedMemory | null>(null)
 
   useEffect(() => {
     if (!shareId) return
@@ -340,6 +354,69 @@ export default function SharedTripPage() {
           </div>
         )}
 
+        {/* Memories gallery */}
+        {snap.memories && snap.memories.length > 0 && (
+          <div>
+            <SectionTitle>
+              Memories{snap.memoryCount ? ` (${snap.memoryCount})` : ''}
+            </SectionTitle>
+            <div className="space-y-3">
+              {groupMemoriesByDay(snap.memories).map(({ dayKey, items }) => (
+                <div
+                  key={dayKey}
+                  className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"
+                >
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                    <Camera size={12} className="text-rose-400" />
+                    <p className="text-xs font-bold text-gray-600">{formatDate(dayKey)}</p>
+                    <span className="text-[10px] text-gray-400">{items.length} photo{items.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 p-2">
+                    {items.map((m, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setLightboxMemory(m)}
+                        className="relative rounded-xl overflow-hidden bg-gray-100 aspect-square cursor-pointer group"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={m.photoUrl}
+                          alt={m.title || 'Memory'}
+                          loading="lazy"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                          onError={(e) => {
+                            const el = e.target as HTMLImageElement
+                            el.style.display = 'none'
+                          }}
+                        />
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-1.5 pointer-events-none">
+                          {m.title && (
+                            <p className="text-white text-[10px] font-bold truncate">{m.title}</p>
+                          )}
+                          {m.taggedTravellers && m.taggedTravellers.length > 0 && (
+                            <div className="flex -space-x-1 mt-0.5">
+                              {m.taggedTravellers.slice(0, 3).map((t, ti) => (
+                                <span
+                                  key={ti}
+                                  className="w-4 h-4 rounded-full border border-white text-[7px] font-black flex items-center justify-center text-white"
+                                  style={{ backgroundColor: t.color }}
+                                  title={t.name}
+                                >
+                                  {t.initials}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Footer CTA */}
         <div className="pt-2 pb-8 text-center">
           <p className="text-xs text-gray-400 mb-3">Planned with VoyaGO</p>
@@ -351,6 +428,93 @@ export default function SharedTripPage() {
           </Link>
         </div>
       </motion.div>
+
+      {/* Read-only memory lightbox */}
+      <AnimatePresence>
+        {lightboxMemory && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+            onClick={() => setLightboxMemory(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-white rounded-2xl overflow-hidden max-w-lg w-full max-h-[90vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="relative bg-gray-900 flex items-center justify-center"
+                style={{ minHeight: 200 }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={lightboxMemory.photoUrl}
+                  alt={lightboxMemory.title || 'Memory'}
+                  className="max-h-[60vh] w-full object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.opacity = '0.3'
+                  }}
+                />
+                <button
+                  onClick={() => setLightboxMemory(null)}
+                  className="absolute top-2 right-2 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 space-y-2 overflow-y-auto">
+                {lightboxMemory.title && (
+                  <p className="font-bold text-gray-900">{lightboxMemory.title}</p>
+                )}
+                {lightboxMemory.description && (
+                  <p className="text-sm text-gray-600">{lightboxMemory.description}</p>
+                )}
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                  {lightboxMemory.dayKey && (
+                    <span className="flex items-center gap-1">
+                      <Calendar size={11} /> {formatDate(lightboxMemory.dayKey)}
+                    </span>
+                  )}
+                  {lightboxMemory.capturedAt && (
+                    <span className="flex items-center gap-1">
+                      <Clock size={11} />
+                      {new Date(lightboxMemory.capturedAt).toLocaleTimeString('en-IN', {
+                        hour: '2-digit', minute: '2-digit', hour12: true,
+                      })}
+                    </span>
+                  )}
+                  {lightboxMemory.placeName && (
+                    <span className="flex items-center gap-1">
+                      <MapPin size={11} /> {lightboxMemory.placeName}
+                    </span>
+                  )}
+                </div>
+                {lightboxMemory.taggedTravellers && lightboxMemory.taggedTravellers.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {lightboxMemory.taggedTravellers.map((t, i) => (
+                      <span
+                        key={i}
+                        className="flex items-center gap-1 rounded-full pl-1 pr-2.5 py-0.5 text-white text-[11px] font-bold"
+                        style={{ backgroundColor: t.color }}
+                      >
+                        <span className="w-4 h-4 rounded-full bg-white/30 flex items-center justify-center text-[8px] font-black">
+                          {t.initials}
+                        </span>
+                        {t.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {/* No delete / edit / download controls on public share */}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

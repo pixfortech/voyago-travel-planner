@@ -11,6 +11,7 @@ import { useApp } from '@/context/AppContext'
 import {
   getTrip, getItineraryDays, getLocationPoints, getMemories, addMemory, deleteMemory,
 } from '@/lib/firestore'
+import { createTagNotifications } from '@/lib/notifications'
 import {
   uploadMemoryPhoto, isAcceptedImage, IMAGE_ACCEPT_ATTR, MAX_IMAGE_BYTES,
 } from '@/lib/memories/storage'
@@ -50,7 +51,7 @@ function groupByDay(memories: TripMemory[]): Array<{ dayKey: string; items: Trip
 export default function MemoriesPage() {
   const { tripId } = useParams<{ tripId: string }>()
   const router = useRouter()
-  const { user } = useApp()
+  const { user, profile } = useApp()
 
   const [trip, setTrip] = useState<Trip | null>(null)
   const [days, setDays] = useState<ItineraryDay[]>([])
@@ -76,6 +77,7 @@ export default function MemoriesPage() {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [formError, setFormError] = useState<string | null>(null)
+  const [notifiedNames, setNotifiedNames] = useState<string[]>([])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -229,6 +231,24 @@ export default function MemoriesPage() {
       setMemories((prev) => [saved, ...prev])
       const key = saved.dayKey ?? now.slice(0, 10)
       setExpandedDays((prev) => { const next = new Set(prev); next.add(key); return next })
+
+      // Fire tag notifications for linked travellers (best-effort; never blocks upload)
+      if (trip && taggedIds.size > 0) {
+        const uploaderName = profile?.name ?? user.displayName ?? 'A member'
+        createTagNotifications({ memory: saved, trip, uploaderName })
+          .then(({ notifiedCount }) => {
+            if (notifiedCount > 0) {
+              const names = Array.from(taggedIds)
+                .map((id) => travellers.find((t) => t.id === id))
+                .filter((t): t is NonNullable<typeof t> => !!t?.userId && t.userId !== user.uid)
+                .map((t) => t.name)
+              setNotifiedNames(names)
+              setTimeout(() => setNotifiedNames([]), 4000)
+            }
+          })
+          .catch(() => { /* silently ignore — notification failure doesn't affect upload */ })
+      }
+
       resetForm()
     } catch {
       setFormError('Upload failed. Please check your connection and try again.')
@@ -304,6 +324,23 @@ export default function MemoriesPage() {
             <span>{formError}</span>
           </div>
         )}
+
+        {/* Tag notification confirmation */}
+        <AnimatePresence>
+          {notifiedNames.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="flex items-start gap-2 bg-emerald-50 text-emerald-700 text-xs rounded-xl px-3 py-2"
+            >
+              <CheckCircle2 size={13} className="mt-0.5 flex-shrink-0" />
+              <span>
+                Notified: <strong>{notifiedNames.join(', ')}</strong>
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Upload form */}
         <AnimatePresence>

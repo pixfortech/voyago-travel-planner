@@ -5,19 +5,20 @@ import { useParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   Link2, Copy, Check, RefreshCw, Eye, Globe, Lock, ExternalLink,
-  Map, Users, Wallet, PieChart, ArrowLeftRight, FileText, AlertTriangle,
+  Map, Users, Wallet, PieChart, ArrowLeftRight, FileText, AlertTriangle, Camera,
 } from 'lucide-react'
 import {
-  getTrip, getItineraryDays, getExpenses, getShare, saveShare, deleteShare,
+  getTrip, getItineraryDays, getExpenses, getShare, saveShare, deleteShare, getMemories,
 } from '@/lib/firestore'
 import { buildSnapshot, DEFAULT_VISIBILITY, generateShareToken } from '@/lib/share'
 import AppShell from '@/components/layout/AppShell'
 import { Skeleton } from '@/components/ui/Skeleton'
 import type {
-  Trip, ItineraryDay, Expense, ShareVisibility,
+  Trip, ItineraryDay, Expense, ShareVisibility, ShareMemoryVisibility, TripMemory,
 } from '@/types'
 
-type VisKey = keyof ShareVisibility
+// Explicit union avoids including non-boolean keys (memoryOptions) in toggle logic
+type VisKey = 'itinerary' | 'travellers' | 'budget' | 'expenseBreakdown' | 'settlement' | 'notes' | 'memories'
 
 interface ToggleRow {
   key: VisKey
@@ -25,6 +26,7 @@ interface ToggleRow {
   description: string
   icon: React.ReactNode
   sensitive?: boolean
+  confirmMessage?: string
 }
 
 const TOGGLES: ToggleRow[] = [
@@ -34,6 +36,16 @@ const TOGGLES: ToggleRow[] = [
   { key: 'expenseBreakdown', label: 'Expense breakdown', description: 'Category and vendor-wise spend', icon: <PieChart size={16} />, sensitive: true },
   { key: 'settlement', label: 'Settlement summary', description: 'Who owes whom after the trip', icon: <ArrowLeftRight size={16} />, sensitive: true },
   { key: 'notes', label: 'Notes', description: 'Your free-text trip notes', icon: <FileText size={16} /> },
+  {
+    key: 'memories',
+    label: 'Memories',
+    description: 'Trip photos in a read-only gallery',
+    icon: <Camera size={16} />,
+    sensitive: true,
+    confirmMessage:
+      'Heads up: enabling this makes trip photos visible to ANYONE with the share link. ' +
+      'GPS coordinates are never included in the public view. Continue?',
+  },
 ]
 
 export default function ShareSettingsPage() {
@@ -43,6 +55,7 @@ export default function ShareSettingsPage() {
   const [trip, setTrip] = useState<Trip | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [days, setDays] = useState<ItineraryDay[]>([])
+  const [memories, setMemories] = useState<TripMemory[]>([])
   const [loading, setLoading] = useState(true)
 
   const [enabled, setEnabled] = useState(false)
@@ -53,23 +66,24 @@ export default function ShareSettingsPage() {
 
   useEffect(() => {
     if (!tripId) return
-    Promise.all([getTrip(tripId), getItineraryDays(tripId), getExpenses(tripId)]).then(
-      async ([t, d, e]) => {
-        if (!t) { router.push('/dashboard'); return }
-        setTrip(t)
-        setDays(d)
-        setExpenses(e)
-        if (t.shareId) {
-          const share = await getShare(t.shareId)
-          if (share) {
-            setShareId(share.id)
-            setEnabled(share.enabled)
-            setVisibility({ ...DEFAULT_VISIBILITY, ...share.visibility })
-          }
+    Promise.all([
+      getTrip(tripId), getItineraryDays(tripId), getExpenses(tripId), getMemories(tripId),
+    ]).then(async ([t, d, e, m]) => {
+      if (!t) { router.push('/dashboard'); return }
+      setTrip(t)
+      setDays(d)
+      setExpenses(e)
+      setMemories(m)
+      if (t.shareId) {
+        const share = await getShare(t.shareId)
+        if (share) {
+          setShareId(share.id)
+          setEnabled(share.enabled)
+          setVisibility({ ...DEFAULT_VISIBILITY, ...share.visibility })
         }
-        setLoading(false)
       }
-    )
+      setLoading(false)
+    })
   }, [tripId, router])
 
   const shareUrl =
@@ -78,12 +92,12 @@ export default function ShareSettingsPage() {
       : ''
 
   // Persist the current enabled/visibility state to Firestore, rebuilding the
-  // public snapshot from the latest trip/expenses/days.
+  // public snapshot from the latest trip/expenses/days/memories.
   async function persist(nextEnabled: boolean, nextVisibility: ShareVisibility, id?: string) {
     if (!trip) return
     setSaving(true)
     try {
-      const snapshot = buildSnapshot(trip, expenses, days, nextVisibility)
+      const snapshot = buildSnapshot(trip, expenses, days, nextVisibility, memories)
       const usedId = await saveShare(trip, snapshot, {
         enabled: nextEnabled,
         visibility: nextVisibility,
@@ -102,10 +116,11 @@ export default function ShareSettingsPage() {
     await persist(next, visibility)
   }
 
-  async function handleToggleVisibility(key: VisKey, sensitive?: boolean) {
+  async function handleToggleVisibility(key: VisKey, sensitive?: boolean, confirmMessage?: string) {
     const turningOn = !visibility[key]
     if (turningOn && sensitive) {
       const ok = window.confirm(
+        confirmMessage ??
         'Heads up: enabling this makes financial details visible to ANYONE with the share link. ' +
         'Only share with people you trust. Continue?'
       )
@@ -115,6 +130,14 @@ export default function ShareSettingsPage() {
     setVisibility(next)
     // Only persist if a share already exists; otherwise it saves once enabled.
     if (shareId) await persist(enabled, next)
+  }
+
+  async function handleToggleMemoryOption(key: keyof ShareMemoryVisibility) {
+    const currentOpts = visibility.memoryOptions ?? DEFAULT_VISIBILITY.memoryOptions!
+    const newOpts = { ...currentOpts, [key]: !currentOpts[key] }
+    const newVis: ShareVisibility = { ...visibility, memoryOptions: newOpts }
+    setVisibility(newVis)
+    if (shareId) await persist(enabled, newVis)
   }
 
   async function handleRegenerate() {
@@ -289,7 +312,7 @@ export default function ShareSettingsPage() {
                     role="switch"
                     aria-checked={on}
                     aria-label={`Toggle ${row.label}`}
-                    onClick={() => handleToggleVisibility(row.key, row.sensitive)}
+                    onClick={() => handleToggleVisibility(row.key, row.sensitive, row.confirmMessage)}
                     disabled={saving}
                     className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 disabled:opacity-50 ${
                       on ? 'bg-primary-500' : 'bg-gray-200'
@@ -306,6 +329,39 @@ export default function ShareSettingsPage() {
             })}
           </div>
 
+          {/* Memory content sub-options — shown only when memories is enabled */}
+          {visibility.memories && (
+            <div className="bg-rose-50/40 border-t border-rose-100 px-5 py-3.5">
+              <p className="text-xs font-bold text-rose-700 mb-2.5">What to show in public memories</p>
+              <div className="space-y-2">
+                {(
+                  [
+                    { key: 'titles', label: 'Photo titles & descriptions' },
+                    { key: 'tags', label: 'Tagged traveller names' },
+                    { key: 'dayGrouping', label: 'Group photos by day' },
+                  ] as Array<{ key: keyof ShareMemoryVisibility; label: string }>
+                ).map((opt) => {
+                  const on = (visibility.memoryOptions ?? DEFAULT_VISIBILITY.memoryOptions!)[opt.key]
+                  return (
+                    <label key={opt.key} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => handleToggleMemoryOption(opt.key)}
+                        disabled={saving}
+                        className="w-4 h-4 rounded accent-rose-500 disabled:opacity-50"
+                      />
+                      <span className="text-xs text-rose-800">{opt.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              <p className="text-[10px] text-rose-600 mt-2">
+                GPS coordinates are never included in the public view.
+              </p>
+            </div>
+          )}
+
           {/* Privacy warning when any financial section is on */}
           {anySensitiveOn && (
             <div className="flex items-start gap-2.5 bg-amber-50 border-t border-amber-100 px-5 py-3.5">
@@ -314,6 +370,20 @@ export default function ShareSettingsPage() {
                 <span className="font-bold">Financial details are visible.</span> Anyone with the
                 link can see budget and settlement amounts. Traveller email addresses are never
                 shared.
+              </p>
+            </div>
+          )}
+
+          {/* Privacy warning when memories are enabled */}
+          {visibility.memories && (
+            <div className="flex items-start gap-2.5 bg-rose-50 border-t border-rose-100 px-5 py-3.5">
+              <AlertTriangle size={15} className="text-rose-500 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-rose-800 leading-relaxed">
+                <span className="font-bold">Photos are publicly visible.</span> Anyone with the
+                link can view trip photos. GPS location data is never included.{' '}
+                {memories.length === 0 && (
+                  <span className="italic">Add memories to your trip first, then re-save share settings.</span>
+                )}
               </p>
             </div>
           )}
