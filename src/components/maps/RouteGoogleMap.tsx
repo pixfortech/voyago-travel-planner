@@ -101,6 +101,10 @@ export default function RouteGoogleMap({
   const onSelectRef = useRef(onSelectPoint)
   onSelectRef.current = onSelectPoint
 
+  // Stable ref so the loader effect's closure always calls the current handler.
+  const onStatusChangeRef = useRef(onStatusChange)
+  onStatusChangeRef.current = onStatusChange
+
   // Key describing the current marker set; markers rebuild only when it changes.
   const markerKeyRef = useRef('')
 
@@ -108,7 +112,7 @@ export default function RouteGoogleMap({
 
   function report(next: MapRenderStatus) {
     setStatus(next)
-    onStatusChange?.(next)
+    onStatusChangeRef.current?.(next)
   }
 
   // ── load SDK + create map ───────────────────────────────────────────────
@@ -116,9 +120,16 @@ export default function RouteGoogleMap({
     let cancelled = false
     report('loading')
 
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Voyago RouteGoogleMap] mounted — calling loadGoogleMaps()')
+    }
+
     loadGoogleMaps()
       .then((maps) => {
         if (cancelled) return
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[Voyago RouteGoogleMap] loadGoogleMaps resolved:', maps ? 'maps object' : 'null')
+        }
         if (!maps || !containerRef.current) {
           report('error')
           return
@@ -135,9 +146,15 @@ export default function RouteGoogleMap({
         })
         infoWindowRef.current = new maps.InfoWindow()
         markerKeyRef.current = '' // force first marker build
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[Voyago RouteGoogleMap] map created, status → ready')
+        }
         report('ready')
       })
-      .catch(() => {
+      .catch((err) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[Voyago RouteGoogleMap] loadGoogleMaps failed:', err)
+        }
         if (!cancelled) report('error')
       })
 

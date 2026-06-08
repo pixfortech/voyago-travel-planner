@@ -13,7 +13,7 @@ import { buildPlaybackPoints, groupPlaybackByDay } from '@/lib/location/playback
 import { computeTripDistance } from '@/lib/location/distance'
 import AppShell from '@/components/layout/AppShell'
 import RouteGoogleMap, { type MapRenderStatus } from '@/components/maps/RouteGoogleMap'
-import { isBrowserMapsConfigured } from '@/lib/maps/mapsLoader'
+import { isBrowserMapsConfigured, getLoaderState } from '@/lib/maps/mapsLoader'
 import type {
   Trip, ItineraryDay, TripLocationPoint, TripMemory,
   PlaybackPoint, PlaybackPointType, OptimiseRouteResult,
@@ -352,7 +352,9 @@ export default function PlaybackPage() {
   const [showCoach, setShowCoach] = useState(true)
 
   // ── Google Maps canvas (Phase 7E) ─────────────────────────────────────
-  const browserMapsConfigured = isBrowserMapsConfigured()
+  // Derived client-side only (after hydration) so SSR never tries to mount the
+  // Google Map — the key check and script injection are browser-only.
+  const [browserMapsConfigured, setBrowserMapsConfigured] = useState(false)
   const [mapStatus, setMapStatus] = useState<MapRenderStatus>('loading')
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -376,6 +378,15 @@ export default function PlaybackPage() {
       .then(r => r.ok ? r.json() : { available: false })
       .then((d: { available?: boolean }) => setMapsAvailable(d.available ?? false))
       .catch(() => { /* keep optimistic */ })
+  }, [])
+
+  // Detect the browser key client-side only (after hydration).
+  useEffect(() => {
+    const configured = isBrowserMapsConfigured()
+    setBrowserMapsConfigured(configured)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Voyago Playback] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY present:', configured)
+    }
   }, [])
 
   // ── derived ───────────────────────────────────────────────────────────
@@ -757,6 +768,11 @@ export default function PlaybackPage() {
                     <Loader2 size={10} className="animate-spin" />
                     Loading map…
                   </div>
+                ) : !browserMapsConfigured ? (
+                  <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <Info size={10} />
+                    SVG fallback · set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to enable map
+                  </div>
                 ) : (
                   <div className="flex items-center gap-1 text-[10px] text-gray-400">
                     <Info size={10} />
@@ -779,6 +795,19 @@ export default function PlaybackPage() {
                   <RouteSvg points={displayPoints} activeIndex={currentIndex} />
                 )}
               </div>
+              {/* Setup note when browser key is missing */}
+              {!browserMapsConfigured && (
+                <div className="mx-3 mb-3 flex items-start gap-2 bg-blue-50 rounded-xl px-3 py-2.5">
+                  <Info size={12} className="text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-blue-700">Enable Google Maps canvas</p>
+                    <p className="text-[11px] text-blue-600 mt-0.5 leading-snug">
+                      Add <code className="bg-blue-100 px-1 rounded font-mono">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> with
+                      a key that has the <strong>Maps JavaScript API</strong> enabled, then restart the dev server.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Playback controls */}
@@ -1218,7 +1247,88 @@ export default function PlaybackPage() {
           </div>
         )}
 
+        {/* Dev-only debug panel — removed from production build by tree-shaking */}
+        {process.env.NODE_ENV === 'development' && (
+          <DevMapStatus
+            browserMapsConfigured={browserMapsConfigured}
+            googleMapMounted={showGoogleMap}
+            mapStatus={mapStatus}
+            routePolylineAvailable={!!activePolyline}
+            polylineIsCurrent={polylineIsCurrent}
+            loaderState={getLoaderState()}
+          />
+        )}
+
       </motion.div>
     </AppShell>
+  )
+}
+
+// ── Dev-only status panel ─────────────────────────────────────────────────
+
+interface DevMapStatusProps {
+  browserMapsConfigured: boolean
+  googleMapMounted: boolean
+  mapStatus: MapRenderStatus
+  routePolylineAvailable: boolean
+  polylineIsCurrent: boolean
+  loaderState: string
+}
+
+function DevMapStatus(p: DevMapStatusProps) {
+  const [open, setOpen] = useState(false)
+
+  const fallbackReason = !p.browserMapsConfigured
+    ? 'NEXT_PUBLIC_GOOGLE_MAPS_API_KEY missing or empty'
+    : p.mapStatus === 'error'
+    ? 'Maps JS SDK failed to load'
+    : p.mapStatus === 'loading'
+    ? 'SDK still loading…'
+    : null
+
+  function row(label: string, value: string, ok?: boolean) {
+    const color = ok === true ? '#16a34a' : ok === false ? '#dc2626' : '#4b5563'
+    return (
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-[10px] text-gray-500">{label}</span>
+        <span className="text-[10px] font-mono font-bold" style={{ color }}>{value}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 overflow-hidden text-xs">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-amber-100 transition-colors"
+      >
+        <span className="font-bold text-amber-800">
+          🗺 Maps Debug{!p.browserMapsConfigured ? ' · key missing' : p.mapStatus === 'error' ? ' · load failed' : p.mapStatus === 'ready' ? ' · ready' : ' · loading'}
+        </span>
+        <span className="text-amber-600 text-[10px]">{open ? '▲ hide' : '▼ show'}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-3 space-y-1 border-t border-amber-200 pt-2">
+          {row('publicBrowserKeyPresent', String(p.browserMapsConfigured), p.browserMapsConfigured)}
+          {row('googleMapMounted', String(p.googleMapMounted), p.googleMapMounted)}
+          {row('loaderState', p.loaderState)}
+          {row('mapStatus', p.mapStatus, p.mapStatus === 'ready')}
+          {row('routePolylineAvailable', String(p.routePolylineAvailable))}
+          {row('polylineIsCurrent', String(p.polylineIsCurrent))}
+          {fallbackReason && (
+            <div className="mt-1.5 text-[10px] text-amber-700 bg-amber-100 rounded-lg px-2 py-1.5 leading-snug">
+              ⚠ fallbackReason: {fallbackReason}
+            </div>
+          )}
+          {!p.browserMapsConfigured && (
+            <div className="mt-1 text-[10px] text-amber-700 leading-snug">
+              Fix: add <code className="bg-amber-200 px-0.5 rounded font-mono">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIza…</code> to
+              .env.local and restart <code className="font-mono">npm run dev</code>.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
