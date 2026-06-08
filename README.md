@@ -426,6 +426,79 @@ use the public `NEXT_PUBLIC_` key for it.)
 
 ---
 
+## Travel History & live tracking (Phase 7A)
+
+Each trip has a **Travel History** page (`/trips/{tripId}/location`) for saving
+location check-ins and an approximate route of where you went.
+
+- **Check-ins** and **foreground live tracking** are **user-triggered only**.
+  The browser location permission is requested **only** when you tap *Use current
+  location* or *Start live tracking* — never on page load.
+- Live tracking is **foreground-only**: it runs while the tab is open and active,
+  and stops when you switch apps or close the tab. (Web apps cannot track in the
+  background; that requires a native app.) Points are de-duplicated to ≥50 m of
+  movement and ≥30 s between saves.
+- Distances are computed locally with the **Haversine formula** (straight-line,
+  ±0.5%) and clearly labelled *approx.* — they are not driving distances.
+- Points are stored at `trips/{tripId}/locations` and are private to trip members.
+
+---
+
+## Photos & Trip Memories (Phase 7B)
+
+Each trip has a **Memories** page (`/trips/{tripId}/memories`) for uploading
+photos with rich metadata: title, description, day, tagged travellers, an
+optional linked itinerary activity or saved check-in, a place name, and optional
+GPS coordinates.
+
+### Firebase Storage setup
+
+Photo binaries are stored in **Firebase Cloud Storage**; the metadata lives in
+Firestore at `trips/{tripId}/memories/{memoryId}`.
+
+1. In the Firebase Console, enable **Cloud Storage** for your project (the
+   default bucket is `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`).
+2. Deploy the Storage rules (they ship in `storage.rules`):
+
+   ```bash
+   firebase deploy --only storage
+   # or, to deploy both rule sets at once:
+   firebase deploy --only firestore:rules,storage
+   ```
+
+No new environment variables are needed — uploads reuse the existing
+`NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` config.
+
+### Storage path strategy
+
+```
+trips/{tripId}/memories/{memoryId}/{sanitizedFileName}
+```
+
+Filenames are sanitised to `[a-zA-Z0-9._-]`. Accepted image types are JPEG, PNG,
+WebP, and HEIC/HEIF (HEIC may upload without a browser preview), max **15 MB**.
+
+### How it behaves
+
+- **Uploads are user-triggered.** You explicitly pick a file; the app never reads
+  your camera or filesystem automatically.
+- **Location is optional and user-triggered.** GPS metadata is attached only when
+  you tap *Use current location*, or when you link the memory to an existing
+  Travel History check-in. The location permission is never requested on load.
+- Memories are shown in a **day-grouped gallery** with a lightbox; you can delete
+  your trip's memories. Deleting removes the Firestore doc first, then makes a
+  best-effort delete of the Storage object.
+- We persist only curated fields — no raw EXIF and no raw browser `File` objects.
+
+### Privacy
+
+- Memories are **private to trip members** (governed by `storage.rules` and
+  `firestore.rules`). There is **no public access**.
+- Memories are **not** included in the public share snapshot (Phase 3). Sharing
+  photos publicly is intentionally left for a future, opt-in phase.
+
+---
+
 ## Scripts
 
 | Command         | Description                          |

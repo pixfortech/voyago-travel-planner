@@ -458,3 +458,44 @@ export interface TripLocationPoint {
   dayKey?: string             // YYYY-MM-DD — set at write time for day grouping
   createdAt: string           // ISO timestamp of Firestore write
 }
+
+// ── Photos & Trip Memories (Phase 7B) ────────────────────────────────────
+//
+// A TripMemory is a single uploaded photo plus its metadata. The image binary
+// lives in Firebase Storage (trips/{tripId}/memories/{memoryId}/{file}); the
+// metadata document lives in Firestore (trips/{tripId}/memories/{memoryId}).
+// Both are private to trip members — never public. We persist only a small,
+// curated set of fields; no raw EXIF and no raw browser File objects.
+
+/** Compact, optional GPS metadata attached to a memory (Phase 7A style). */
+export interface MemoryLocation {
+  latitude: number
+  longitude: number
+  accuracy?: number
+  capturedAt?: string
+  source: LocationSource
+}
+
+export interface TripMemory {
+  id: string
+  tripId: string
+  userId: string
+  title?: string
+  description?: string
+  // Storage download URL + the path we need to delete the underlying object.
+  photoUrl: string
+  storagePath: string
+  originalFileName?: string
+  contentType?: string
+  sizeBytes?: number
+  createdAt: string           // ISO — Firestore write time
+  uploadedAt: string          // ISO — upload completion time
+  capturedAt?: string         // ISO — when the photo was taken, if known
+  dayKey?: string             // YYYY-MM-DD for day grouping
+  location?: MemoryLocation
+  placeName?: string          // user-entered place label
+  taggedTravellerIds?: string[]
+  tags?: string[]
+  linkedActivityId?: string
+  linkedLocationPointId?: string
+}

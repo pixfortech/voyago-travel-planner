@@ -6,8 +6,8 @@ rules_version = '2';
 // deployed before any upload/download works:
 //   firebase deploy --only storage
 //
-// Photos and receipts are not uploaded by the app until a later phase, but the
-// storage layout is governed from day one. Access to a trip's media requires
+// Trip photo memories (Phase 7B) are stored under
+// trips/{tripId}/memories/{memoryId}/{file}. Access to a trip's media requires
 // membership of that trip, cross-checked against the Firestore trip document.
 // Avatars are private to each user. There is NO public access.
 

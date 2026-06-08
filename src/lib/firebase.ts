@@ -3,6 +3,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
+import { getStorage } from 'firebase/storage'
 
 /**
  * Firebase Web SDK configuration.
@@ -75,4 +76,7 @@ validateFirebaseConfig()
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 export const db = getFirestore(app)
+// Firebase Storage — used for trip photo memories (Phase 7B). Uploads/downloads
+// are governed by storage.rules (trip-member access only; no public access).
+export const storage = getStorage(app)
 export default app

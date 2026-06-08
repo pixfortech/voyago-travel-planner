@@ -8,7 +8,7 @@ import {
   Sparkles, Camera, Lock, Plus, ChevronRight, CheckCircle2, Circle,
   TrendingUp, UserPlus, Navigation,
 } from 'lucide-react'
-import { getTrip, deleteTrip, getExpenses } from '@/lib/firestore'
+import { getTrip, deleteTrip, getExpenses, getMemories } from '@/lib/firestore'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import AppShell from '@/components/layout/AppShell'
 import Badge from '@/components/ui/Badge'
@@ -19,7 +19,7 @@ import {
 import {
   getTotalSpent, getBudgetUsagePercent, getPerHeadBudget, getPerHeadActualCost,
 } from '@/lib/calculations'
-import type { Trip, Expense } from '@/types'
+import type { Trip, Expense, TripMemory } from '@/types'
 import Link from 'next/link'
 
 const fadeUp = (delay = 0) => ({
@@ -33,15 +33,17 @@ export default function TripOverviewPage() {
   const router = useRouter()
   const [trip, setTrip] = useState<Trip | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
+  const [memories, setMemories] = useState<TripMemory[]>([])
   const [loading, setLoading] = useState(true)
   const { status: mapsStatus } = useMapsStatus()
 
   useEffect(() => {
     if (!tripId) return
-    Promise.all([getTrip(tripId), getExpenses(tripId)]).then(([t, e]) => {
+    Promise.all([getTrip(tripId), getExpenses(tripId), getMemories(tripId)]).then(([t, e, m]) => {
       if (!t) { router.push('/dashboard'); return }
       setTrip(t)
       setExpenses(e)
+      setMemories(m)
       setLoading(false)
     })
   }, [tripId, router])
@@ -347,18 +349,15 @@ export default function TripOverviewPage() {
                 </div>
               </Link>
 
-              <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative overflow-hidden opacity-70">
-                <div className="absolute top-2.5 right-2.5">
-                  <span className="inline-flex items-center gap-1 bg-primary-100 text-primary-600 text-[10px] font-black px-2 py-0.5 rounded-full">
-                    <Lock size={8} /> Soon
-                  </span>
+              <Link href={`/trips/${tripId}/memories`}>
+                <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-rose-200 hover:-translate-y-0.5 transition-all cursor-pointer">
+                  <div className="w-10 h-10 bg-gradient-to-br from-rose-500 to-pink-500 rounded-xl flex items-center justify-center mb-3 shadow-sm shadow-rose-500/20">
+                    <Camera size={20} className="text-white" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-sm">Memories</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Photos & moments</p>
                 </div>
-                <div className="w-10 h-10 bg-gradient-to-br from-rose-400 to-pink-500 rounded-xl flex items-center justify-center mb-3">
-                  <Camera size={20} className="text-white" />
-                </div>
-                <p className="font-bold text-gray-500 text-sm">Photos</p>
-                <p className="text-xs text-gray-400 mt-0.5">Trip memories</p>
-              </div>
+              </Link>
             </div>
           </motion.div>
 
@@ -420,6 +419,40 @@ export default function TripOverviewPage() {
             </div>
           </motion.div>
 
+          {/* Latest memories */}
+          {memories.length > 0 && (
+            <motion.div {...fadeUp(0.1)}>
+              <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-wide">Recent Memories</p>
+                  <Link
+                    href={`/trips/${tripId}/memories`}
+                    className="text-[11px] font-semibold text-rose-500 hover:text-rose-600 transition-colors"
+                  >
+                    View all
+                  </Link>
+                </div>
+                <Link href={`/trips/${tripId}/memories`} className="grid grid-cols-3 gap-1.5">
+                  {memories.slice(0, 3).map((m) => (
+                    <div key={m.id} className="relative rounded-lg overflow-hidden bg-gray-100 aspect-square">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={m.photoUrl}
+                        alt={m.title || 'Memory'}
+                        loading="lazy"
+                        className="w-full h-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3' }}
+                      />
+                    </div>
+                  ))}
+                </Link>
+                <p className="text-[11px] text-gray-400 mt-2">
+                  {memories.length} photo{memories.length !== 1 ? 's' : ''} saved
+                </p>
+              </div>
+            </motion.div>
+          )}
+
           {/* Quick actions */}
           <motion.div {...fadeUp(0.12)}>
             <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
@@ -473,6 +506,19 @@ export default function TripOverviewPage() {
                     Travel History
                   </span>
                   <ChevronRight size={13} className="text-gray-300 group-hover:text-emerald-400 transition-colors" />
+                </Link>
+
+                <Link
+                  href={`/trips/${tripId}/memories`}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-rose-50 group transition-colors"
+                >
+                  <div className="w-7 h-7 bg-rose-50 group-hover:bg-rose-100 rounded-lg flex items-center justify-center transition-colors">
+                    <Camera size={13} className="text-rose-500" />
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700 group-hover:text-rose-600 transition-colors flex-1">
+                    Memories
+                  </span>
+                  <ChevronRight size={13} className="text-gray-300 group-hover:text-rose-400 transition-colors" />
                 </Link>
 
                 <Link

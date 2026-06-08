@@ -27,9 +27,11 @@ import type {
   ShareVisibility,
   SharedTripSnapshot,
   TripLocationPoint,
+  TripMemory,
 } from '@/types'
 import { generateTripColor, generateId, getDatesInRange } from './utils'
 import { generateShareToken } from './share'
+import { deleteMemoryPhoto } from './memories/storage'
 
 /**
  * Recursively drop keys whose value is `undefined`. Firestore rejects undefined
@@ -344,5 +346,43 @@ export async function getLocationPoints(tripId: string): Promise<TripLocationPoi
 
 export async function deleteLocationPoint(tripId: string, locationId: string): Promise<void> {
   await deleteDoc(doc(db, 'trips', tripId, 'locations', locationId))
+}
+
+// ── Photo memories (Phase 7B) ─────────────────────────────────────────────
+//
+// Metadata lives in trips/{tripId}/memories — trip membership rules apply (see
+// firestore.rules wildcard match). The image binary lives in Firebase Storage
+// (see src/lib/memories/storage.ts). Memories are private to trip members and
+// are NOT included in public share snapshots.
+
+export async function addMemory(
+  tripId: string,
+  data: Omit<TripMemory, 'id' | 'createdAt'>
+): Promise<TripMemory> {
+  const now = new Date().toISOString()
+  const ref = await addDoc(collection(db, 'trips', tripId, 'memories'), {
+    ...pruneUndefined(data),
+    createdAt: now,
+  })
+  return { ...data, id: ref.id, createdAt: now }
+}
+
+export async function getMemories(tripId: string): Promise<TripMemory[]> {
+  const snap = await getDocs(
+    query(collection(db, 'trips', tripId, 'memories'), orderBy('uploadedAt', 'desc'))
+  )
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TripMemory)
+}
+
+/**
+ * Delete a memory: remove the Firestore metadata doc first, then best-effort
+ * delete the Storage object. If the Storage delete fails the metadata removal
+ * still counts as success (the user no longer sees the memory).
+ */
+export async function deleteMemory(tripId: string, memory: TripMemory): Promise<void> {
+  await deleteDoc(doc(db, 'trips', tripId, 'memories', memory.id))
+  if (memory.storagePath) {
+    await deleteMemoryPhoto(memory.storagePath)
+  }
 }
 
