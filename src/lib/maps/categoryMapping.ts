@@ -1,4 +1,4 @@
-import type { ActivityCategory } from '@/types'
+import type { ActivityCategory, ActivityType } from '@/types'
 
 const PLACE_TYPE_MAP: Record<string, ActivityCategory> = {
   restaurant: 'food',
@@ -141,4 +141,22 @@ export function mapPlaceTypesToCategory(types: string[]): ActivityCategory {
     if (found.has(cat)) return cat
   }
   return 'other'
+}
+
+/** Map a Voyago ActivityCategory to the coarser ActivityType used for icons/grouping. */
+const CATEGORY_TO_TYPE: Record<ActivityCategory, ActivityType> = {
+  sightseeing: 'activity',
+  food: 'food',
+  hotel: 'hotel',
+  transport: 'transport',
+  shopping: 'other',
+  adventure: 'activity',
+  spiritual: 'activity',
+  leisure: 'activity',
+  emergency: 'other',
+  other: 'other',
+}
+
+export function categoryToActivityType(category: ActivityCategory): ActivityType {
+  return CATEGORY_TO_TYPE[category] ?? 'other'
 }

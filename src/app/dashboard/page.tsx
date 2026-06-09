@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Plane, Calendar, MapPin } from 'lucide-react'
+import { Plus, Plane, Calendar, MapPin, Sparkles } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import { getTrips, deleteTrip } from '@/lib/firestore'
 import { getDayCount } from '@/lib/utils'
@@ -108,6 +108,21 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
+
+          {/* AI Trip Generator banner */}
+          <button
+            onClick={() => router.push(`/trips/${trips[0]!.id}/ai-generator`)}
+            className="w-full text-left mb-6 rounded-2xl border border-violet-100 bg-gradient-to-r from-violet-50 to-fuchsia-50 p-4 flex items-center gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all"
+          >
+            <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm shadow-violet-500/20">
+              <Sparkles size={20} className="text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-gray-900 text-sm">AI Trip Generator</p>
+              <p className="text-xs text-gray-500">Auto-fill a full day-by-day itinerary inside any trip — preview &amp; edit before saving.</p>
+            </div>
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 flex-shrink-0">New</span>
+          </button>
 
           {/* Trip cards grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

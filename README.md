@@ -911,6 +911,101 @@ live on existing trip-member documents.
 
 ---
 
+## AI Trip Generator + Auto-Fill Itinerary (Phase 15C)
+
+Generates a complete, day-by-day itinerary for an **existing trip** from its
+destination, dates, budget, traveller composition and preferences. Open it from
+the **trip overview → AI Trip Generator** (`/trips/[tripId]/ai-generator`), from
+the **dashboard banner**, or via the note shown when creating a trip.
+
+> Generating a brand-new trip from scratch (before it exists) is intentionally
+> left as **Coming Soon** — create the trip first, then auto-fill it here. This
+> keeps the create-trip flow untouched and the generation surface safe.
+
+### Guided wizard
+
+A 5-step wizard collects, with INR defaults:
+
+1. **Basics** — destination, the trip's dates/day count (read-only), and the
+   merge mode (see below).
+2. **Travellers** — total plus group counts (couples, adults, kids, seniors,
+   friends) and group flags (family / office / pilgrimage) and free-text notes
+   such as _"two seniors, avoid stairs, prefer vegetarian"_. No per-person
+   personal data is required.
+3. **Preferences** — pace (relaxed/balanced/packed), interests, food
+   preferences, allergy/avoid list (treated as a **constraint, never a safety
+   guarantee**), accommodation style, route preference and constraint toggles.
+4. **Budget** — total budget in the trip currency (0 = no target).
+5. **Must-visit / avoid** — comma-separated lists plus extra notes.
+
+### AI endpoint
+
+`POST /api/ai/trip-generator` takes a **privacy-safe** `TripGeneratorInput`
+(destination, dates, composition, preferences, budget, mode, and a compact
+summary of existing days). It sends **no emails, UIDs, tokens, GPS history,
+comments, bills or memories**. It uses the shared AI provider on the
+`generation` tier (Claude Opus) and returns structured JSON only:
+
+- `tripSummary`, `assumptions`, `confidence`
+- `dayPlans[]` — each with `theme`, `estimatedDayCost`, `mealPlan`,
+  `restBreaks`, and `activities[]`
+- each activity: `title`, `description`, `category`, `startTime`/`endTime`,
+  `estimatedCost` (+ per-person), `locationName`, `suggestedPlaceSearchQuery`,
+  `priority`, `timeToSpend`, `routeNotes`, `whyRecommended`, `foodInsightNotes`
+- `budgetSummary` (total, per-head, remaining buffer, high-cost risks,
+  within-budget), `comfortSummary` (walking intensity, elderly/kid suitability,
+  pace risk), `routeSummary` (ordering logic, backtracking risk), `warnings`
+
+**Development Mock vs Anthropic.** With no `ANTHROPIC_API_KEY` the existing mock
+provider returns a deterministic plan whose summary is prefixed `[DEV MOCK]` and
+which is clearly badged **Development Mock** in the preview. With a key set, real
+Opus generation is used. Either way the output is labelled approximate.
+
+### Preview → edit → apply (nothing auto-saved)
+
+The generated plan is shown as a fully editable preview:
+
+- Edit each activity's time, title, cost, category, location, and move it to
+  another day; remove/restore activities.
+- **Enrich with Google Places** (user-triggered) — looks up each
+  `suggestedPlaceSearchQuery`, attaches `placeId`/rating/lat-lng, and refines the
+  category from Google place types. Optional, bounded (max 24 lookups/run), and
+  **skipped gracefully** when no Google key is configured.
+- **Optimise route for this plan** (user-triggered) — sends enriched stops to the
+  existing road-aware optimiser, shows before/after distance and time, and only
+  reorders the preview when you click **Apply optimised order**.
+- **Regenerate** the whole plan, or **Discard**.
+
+**Apply** writes only after a confirmation dialog summarising exactly what will
+be added/replaced and what is skipped. Merge modes:
+
+| Mode | Behaviour |
+| ---- | --------- |
+| `append` | Adds generated activities; nothing existing is removed. |
+| `fill_empty` | Writes only to days that currently have **no** activities. |
+| `replace_future` | Clears + replaces days **strictly after today**. |
+| `replace_all_unprotected` | Clears + replaces **today and future** days. |
+
+In every mode, **completed and past days are protected** and **confirmed-visited
+/ completed activities are preserved** even when a day is "replaced". Generated
+activities are saved with `bookingStatus: 'planned'`, an `(AI Trip Generator)`
+note for traceability, and their estimated costs flow into the itinerary's
+estimated total (so the **AI Budget Coach** can analyse the applied plan).
+Generated costs are **planned estimates, not actual expenses**. After applying,
+you're redirected to the itinerary page.
+
+### Privacy & safety
+
+- The plan is **never** auto-applied; all Google/Anthropic calls are
+  user-triggered. No keys reach the browser (server key for Places/Routes,
+  `NEXT_PUBLIC_…` only for the map canvas elsewhere).
+- Allergy/avoid preferences are constraints only — Voyago makes **no medical,
+  financial or food-safety guarantees**.
+- Generation works fully **without** Google keys; enrichment/optimise simply
+  show as unavailable.
+
+---
+
 ## Scripts
 
 | Command         | Description                          |

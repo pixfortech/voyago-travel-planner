@@ -1344,3 +1344,176 @@ export interface GapPlanRouteSummary {
   optimisationMethod: RouteOptimisationMethod
   warnings: string[]
 }
+
+// ── AI Trip Generator + Auto-Fill Itinerary (Phase 15C) ──────────────────────
+//
+// Generates a complete day-by-day itinerary for an EXISTING trip from
+// destination, dates, budget, traveller composition, and preferences. The
+// generated plan is a PREVIEW ONLY — the endpoint never writes Firestore, the
+// user edits the preview, and nothing is saved until they tap Apply. All cost,
+// timing and route figures are APPROXIMATE. Input is privacy-safe: no emails,
+// uids, tokens, private GPS history, comments, bills, or memories.
+
+export type TravelPace = 'relaxed' | 'balanced' | 'packed'
+
+/** How a generated plan is merged into an existing trip's itinerary. */
+export type GeneratorMode =
+  | 'append'                  // add generated activities, keep everything existing
+  | 'fill_empty'              // only write to days that currently have no activities
+  | 'replace_future'          // clear + replace days strictly after today (protects completed)
+  | 'replace_all_unprotected' // clear + replace today and future days (protects completed/visited)
+
+/** Group-level traveller make-up. No per-person personal data is required. */
+export interface TravellerComposition {
+  total: number
+  couples?: number
+  adults?: number
+  kids?: number
+  seniors?: number
+  friends?: number
+  family?: boolean
+  office?: boolean
+  pilgrimage?: boolean
+  /** Free-text, e.g. "two senior citizens, avoid stairs, prefer vegetarian". */
+  notes?: string
+}
+
+export type TripInterest =
+  | 'sightseeing' | 'food' | 'shopping' | 'adventure' | 'spiritual'
+  | 'museums' | 'nature' | 'nightlife' | 'photography'
+  | 'kid_friendly' | 'senior_friendly' | 'luxury' | 'budget' | 'local_culture'
+
+export type FoodPreference =
+  | 'vegetarian' | 'non_vegetarian' | 'jain' | 'vegan'
+  | 'local_food' | 'cafe_hopping' | 'fine_dining' | 'street_food'
+
+export type AccommodationStyle = 'budget' | 'mid_range' | 'premium' | 'luxury'
+
+export type RoutePreferenceStyle =
+  | 'shortest' | 'fastest' | 'scenic' | 'less_walking' | 'senior_friendly' | 'child_friendly'
+
+/** Preference bundle collected by the generator wizard. */
+export interface TripGenerationPreferences {
+  pace: TravelPace
+  interests: TripInterest[]
+  foodPreferences: FoodPreference[]
+  /** Allergies / avoid list — treated as a constraint, never a safety guarantee. */
+  foodAvoid?: string
+  accommodationStyle?: AccommodationStyle
+  routePreference?: RoutePreferenceStyle
+  /** Constraint toggles, e.g. "avoid early mornings", "low walking", "rest breaks". */
+  constraints: string[]
+  mustVisit: string[]
+  avoidPlaces: string[]
+  extraNotes?: string
+}
+
+/** A compact summary of one existing itinerary day, for generator context. */
+export interface GeneratorExistingDay {
+  date: string
+  dayNumber: number
+  activityTitles: string[]
+  isPast: boolean
+  isEmpty: boolean
+  /** True when the day has a confirmed-visited or completed activity (protected). */
+  isProtected: boolean
+}
+
+/** Privacy-safe input sent to POST /api/ai/trip-generator. */
+export interface TripGeneratorInput {
+  destination: string
+  startDate: string
+  endDate: string
+  dayCount: number
+  budget: number
+  currency: string
+  travellerCount: number
+  composition: TravellerComposition
+  tripType: TripType
+  preferences: TripGenerationPreferences
+  mode: GeneratorMode
+  today: string                 // YYYY-MM-DD
+  existingDays?: GeneratorExistingDay[]
+}
+
+export type ActivityPriority = 'must' | 'recommended' | 'optional'
+
+/** A single AI-proposed activity in the generated plan (never auto-applied). */
+export interface GeneratedActivity {
+  title: string
+  description?: string
+  category: ActivityCategory
+  startTime?: string
+  endTime?: string
+  /** Approx total cost for the whole group, in the trip currency. */
+  estimatedCost: number
+  estimatedCostPerPerson?: number
+  locationName?: string
+  /** A query the user can run against Google Places to enrich this place. */
+  suggestedPlaceSearchQuery?: string
+  bookingStatus: BookingStatus
+  priority?: ActivityPriority
+  foodInsightNotes?: string
+  routeNotes?: string
+  whyRecommended?: string
+  /** Tentative time to spend, e.g. "1–2 hrs". */
+  timeToSpend?: string
+  isBreak?: boolean
+}
+
+/** A proposed day in the generated plan. */
+export interface GeneratedDay {
+  date: string
+  dayNumber: number
+  theme?: string
+  estimatedDayCost: number
+  mealPlan?: string
+  restBreaks?: string
+  notes?: string
+  activities: GeneratedActivity[]
+}
+
+export interface GeneratedBudgetSummary {
+  totalEstimatedCost: number
+  perHeadEstimate: number
+  /** budget − totalEstimatedCost (may be negative). */
+  remainingBuffer: number
+  highCostRisks: string[]
+  withinBudget: boolean
+}
+
+export interface GeneratedComfortSummary {
+  walkingIntensity: 'low' | 'moderate' | 'high'
+  elderlyFriendly: boolean
+  kidFriendly: boolean
+  paceRisk: 'low' | 'medium' | 'high'
+  notes: string[]
+}
+
+export interface GeneratedRouteSummary {
+  logic: string
+  backtrackingRisk: 'low' | 'medium' | 'high'
+  notes: string[]
+}
+
+/** Structured preview returned by the trip generator. */
+export interface TripGeneratorResult {
+  tripSummary: string
+  assumptions: string[]
+  dayPlans: GeneratedDay[]
+  budgetSummary: GeneratedBudgetSummary
+  comfortSummary: GeneratedComfortSummary
+  routeSummary: GeneratedRouteSummary
+  warnings: string[]
+  confidence: InsightConfidence
+  /** Always present — reminds the user the plan is approximate. */
+  approximateLabel: string
+}
+
+/** API response envelope for POST /api/ai/trip-generator. */
+export interface TripGeneratorResponse {
+  result: TripGeneratorResult
+  isMock: boolean
+  provider: 'anthropic' | 'mock'
+  model: string
+}

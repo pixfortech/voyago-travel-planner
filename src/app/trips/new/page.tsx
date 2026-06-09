@@ -439,6 +439,14 @@ export default function NewTripPage() {
               ))}
             </div>
 
+            <div className="flex items-start gap-2 rounded-2xl bg-violet-50/70 border border-violet-100 p-3">
+              <span className="text-base leading-none mt-0.5">✨</span>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                After creating, open <strong>AI Trip Generator</strong> from the trip page to auto-fill a full
+                day-by-day itinerary — you preview and edit everything before it&apos;s saved.
+              </p>
+            </div>
+
             <div className="flex gap-3">
               <Button variant="secondary" onClick={back} className="flex-1">
                 ← Back
