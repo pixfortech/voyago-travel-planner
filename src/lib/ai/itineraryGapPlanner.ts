@@ -62,6 +62,19 @@ export function buildGapPlannerUserMessage(input: GapPlannerInput): string {
         .join('\n')
     : '(none remaining)'
 
+  const routeSection = input.routeSummary
+    ? `\nRoute analysis for remaining places (${
+        input.routeSummary.optimisationMethod === 'haversine_fallback'
+          ? 'straight-line estimate'
+          : 'road-aware'
+      }):
+- Stops with location data: ${input.routeSummary.stopCount}
+- Total travel distance: ${input.routeSummary.totalDistanceKm} km
+- Total travel time: ${input.routeSummary.totalDurationText}
+${input.routeSummary.warnings.length ? `- Notes: ${input.routeSummary.warnings.slice(0, 2).join('; ')}` : ''}
+The remaining places listed below are already sorted in optimised travel order — follow this order when scheduling stops.`
+    : ''
+
   return `Trip: "${input.tripName}" to ${input.destination}
 Trip type: ${input.tripType}, ${input.travellerCount} traveller(s), currency ${input.currency}
 Dates: ${input.startDate} → ${input.endDate}
@@ -75,7 +88,7 @@ Start point: ${
       : input.startPointName || 'not specified — assume a central start'
   }
 ${input.budgetRemaining != null ? `Budget remaining (${input.currency}): ${input.budgetRemaining}` : 'Budget remaining: not specified'}
-${input.constraints ? `Constraints: ${input.constraints}` : ''}
+${input.constraints ? `Constraints: ${input.constraints}` : ''}${routeSection}
 
 Already visited:
 ${visited}

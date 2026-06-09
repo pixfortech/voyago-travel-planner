@@ -6,6 +6,7 @@ import { motion } from 'framer-motion'
 import {
   MapPin, Navigation, CheckCircle2, Circle, SkipForward, Sparkles,
   Loader2, AlertTriangle, Crosshair, Save, RotateCcw, Check, Trash2, Info,
+  Map as MapIcon, Route,
 } from 'lucide-react'
 import {
   getTrip, getItineraryDays, getExpenses, getLocationPoints, getMemories,
@@ -22,12 +23,17 @@ import { computeGapAnalysis } from '@/lib/location/gapAnalysis'
 import { detectionMap } from '@/lib/location/visited'
 import { gapPlannerModeLabel } from '@/lib/ai/itineraryGapPlanner'
 import { getCurrentPosition, type GeoError } from '@/lib/location/geo'
+import { haversineMeters } from '@/lib/location/distance'
+import { useMapsStatus } from '@/lib/maps/useMapsStatus'
+import SmartPlannerMap, { type SmartPlannerMarker } from '@/components/maps/SmartPlannerMap'
 import type {
   Trip, ItineraryDay, Activity, Expense, TripLocationPoint, TripMemory,
-  GapAnalysis, VisitedStatus, VisitedConfidence,
+  GapAnalysis, GapAnalysisPlace, VisitedStatus, VisitedConfidence,
   GapPlannerMode, GapPlannerInput, GapPlannerResult, GapPlannerProposedActivity,
-  ActivityCategory, ActivityType,
+  ActivityCategory, ActivityType, OptimiseRouteResult, GapPlanRouteSummary,
 } from '@/types'
+
+// ── Constants ───────────────────────────────────────────────────────────────
 
 const MODES: { key: GapPlannerMode; label: string }[] = [
   { key: 'complete_remaining', label: 'Complete remaining' },
@@ -56,7 +62,8 @@ const CONFIDENCE_CLS: Record<VisitedConfidence, string> = {
   low: 'bg-gray-100 text-gray-500',
 }
 
-/** Local editable copy of a proposed activity, with a removed flag. */
+// ── Types ───────────────────────────────────────────────────────────────────
+
 interface EditableActivity extends GapPlannerProposedActivity {
   _key: string
   _removed: boolean
@@ -67,17 +74,89 @@ interface EditableDay {
   activities: EditableActivity[]
 }
 
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+interface LocalOptimiseResult {
+  originalDistanceKm: number
+  optimisedDistanceKm: number
+  distanceSavedKm: number
+  originalDurationSeconds: number
+  optimisedDurationSeconds: number
+  durationSavedSeconds: number
+  optimisedOrder: string[]
+  warnings: string[]
+  method: 'road' | 'haversine'
+  polyline?: string
 }
-function nowHHMM(): string {
-  return new Date().toTimeString().slice(0, 5)
+
+interface LocalRoutePreview {
+  totalDistanceKm: number
+  durationText: string
+  stopCount: number
+  method: 'road' | 'haversine'
+  warnings: string[]
+  polyline?: string
 }
+
+// ── Small utilities ──────────────────────────────────────────────────────────
+
+function todayISO(): string { return new Date().toISOString().slice(0, 10) }
+function nowHHMM(): string { return new Date().toTimeString().slice(0, 5) }
+
+function fmtDuration(seconds: number): string {
+  const mins = Math.round(seconds / 60)
+  if (mins < 1) return '< 1 min'
+  if (mins < 60) return `${mins} min`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m > 0 ? `${h} hr ${m} min` : `${h} hr`
+}
+
+function fmtDistance(meters: number): string {
+  if (meters >= 1000) return `${(meters / 1000).toFixed(meters >= 10_000 ? 0 : 1)} km`
+  return `${Math.round(meters)} m`
+}
+
+/** Nearest-neighbour sort for Haversine fallback. */
+function nearestNeighbourSort(
+  places: GapAnalysisPlace[],
+  from: { lat: number; lng: number } | null,
+): GapAnalysisPlace[] {
+  if (!from || places.length === 0) return places
+  const pool = [...places]
+  const sorted: GapAnalysisPlace[] = []
+  let cur = from
+  while (pool.length > 0) {
+    let best = 0
+    let bestDist = Infinity
+    for (let i = 0; i < pool.length; i++) {
+      const d = haversineMeters(cur.lat, cur.lng, pool[i]!.lat!, pool[i]!.lng!)
+      if (d < bestDist) { bestDist = d; best = i }
+    }
+    const next = pool.splice(best, 1)[0]!
+    sorted.push(next)
+    cur = { lat: next.lat!, lng: next.lng! }
+  }
+  return sorted
+}
+
+/** Find lat/lng for a proposed activity title by matching against known places. */
+function lookupCoords(
+  title: string,
+  allPlaces: GapAnalysisPlace[],
+): { lat: number; lng: number } | null {
+  const t = title.toLowerCase().trim()
+  const match = allPlaces.find(
+    (p) => p.lat != null && p.lng != null && p.title.toLowerCase().trim() === t,
+  )
+  return match ? { lat: match.lat!, lng: match.lng! } : null
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SmartPlannerPage() {
   const { tripId } = useParams<{ tripId: string }>()
   const router = useRouter()
   const { user } = useApp()
+  const { status: mapsStatus } = useMapsStatus()
 
   const [trip, setTrip] = useState<Trip | null>(null)
   const [days, setDays] = useState<ItineraryDay[]>([])
@@ -86,11 +165,22 @@ export default function SmartPlannerPage() {
   const [memories, setMemories] = useState<TripMemory[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Current-location check (user-triggered only).
+  // Current-location (user-triggered only).
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null)
   const [locating, setLocating] = useState(false)
   const [geoError, setGeoError] = useState<string | null>(null)
   const [savingCheckin, setSavingCheckin] = useState(false)
+
+  // Map view (user-toggled, defaults to hidden).
+  const [showMap, setShowMap] = useState(false)
+  const [activeMapMarkerId, setActiveMapMarkerId] = useState<string | null>(null)
+
+  // Route optimise for remaining places.
+  const [optimising, setOptimising] = useState(false)
+  const [optimiseResult, setOptimiseResult] = useState<LocalOptimiseResult | null>(null)
+  const [optimisedRemainingIds, setOptimisedRemainingIds] = useState<string[] | null>(null)
+  const [optimiseApplied, setOptimiseApplied] = useState(false)
+  const [optimiseError, setOptimiseError] = useState<string | null>(null)
 
   // Planning controls.
   const [mode, setMode] = useState<GapPlannerMode>('today_only')
@@ -106,6 +196,10 @@ export default function SmartPlannerPage() {
   const [editDays, setEditDays] = useState<EditableDay[]>([])
   const [applying, setApplying] = useState(false)
   const [applyNote, setApplyNote] = useState<string | null>(null)
+
+  // Route preview for AI plan.
+  const [calculatingRoute, setCalculatingRoute] = useState(false)
+  const [routePreview, setRoutePreview] = useState<LocalRoutePreview | null>(null)
 
   useEffect(() => {
     if (!tripId) return
@@ -132,7 +226,67 @@ export default function SmartPlannerPage() {
     return { analysis, detMap: detectionMap(detections) }
   }, [trip, days, locationPoints, memories, spent, currentLocation])
 
-  // ── Current location ──
+  // Remaining places, optionally sorted by the optimised order.
+  const sortedRemainingPlaces = useMemo(() => {
+    if (!analysis) return []
+    if (!optimiseApplied || !optimisedRemainingIds) return analysis.remainingPlaces
+    const order = new Map(optimisedRemainingIds.map((id, i) => [id, i]))
+    return [...analysis.remainingPlaces].sort((a, b) => {
+      const ia = order.get(a.activityId) ?? 999
+      const ib = order.get(b.activityId) ?? 999
+      return ia - ib
+    })
+  }, [analysis, optimiseApplied, optimisedRemainingIds])
+
+  // Compact route summary for AI context (present when optimise is applied).
+  const routeSummary = useMemo((): GapPlanRouteSummary | undefined => {
+    if (!optimiseResult || !optimiseApplied) return undefined
+    return {
+      stopCount: optimisedRemainingIds?.length ?? 0,
+      totalDistanceKm: optimiseResult.optimisedDistanceKm,
+      totalDurationText: optimiseResult.optimisedDurationSeconds > 0
+        ? fmtDuration(optimiseResult.optimisedDurationSeconds)
+        : `${optimiseResult.optimisedDistanceKm} km straight-line`,
+      optimisationMethod: optimiseResult.method === 'road' ? 'route_matrix_tsp' : 'haversine_fallback',
+      warnings: optimiseResult.warnings,
+    }
+  }, [optimiseResult, optimiseApplied, optimisedRemainingIds])
+
+  // Map markers derived from gap analysis + current location.
+  const mapMarkers = useMemo((): SmartPlannerMarker[] => {
+    if (!analysis) return []
+    const markers: SmartPlannerMarker[] = []
+    if (currentLocation) {
+      markers.push({
+        id: 'current',
+        lat: currentLocation.lat, lng: currentLocation.lng,
+        label: 'Your location', type: 'current',
+      })
+    }
+    for (const p of analysis.visitedPlaces) {
+      if (p.lat == null || p.lng == null) continue
+      markers.push({
+        id: p.activityId, lat: p.lat, lng: p.lng, label: p.title,
+        type: p.status === 'confirmed_visited' ? 'confirmed' : 'likely',
+        sublabel: `Day ${p.dayNumber}`,
+      })
+    }
+    for (const p of analysis.remainingPlaces) {
+      if (p.lat == null || p.lng == null) continue
+      markers.push({ id: p.activityId, lat: p.lat, lng: p.lng, label: p.title, type: 'remaining', sublabel: `Day ${p.dayNumber}` })
+    }
+    for (const p of analysis.skippedPlaces) {
+      if (p.lat == null || p.lng == null) continue
+      markers.push({ id: p.activityId, lat: p.lat, lng: p.lng, label: p.title, type: 'skipped', sublabel: `Day ${p.dayNumber} · Skipped` })
+    }
+    return markers
+  }, [analysis, currentLocation])
+
+  // Active polyline: optimised route when applied, or AI plan route preview.
+  const activePolyline = routePreview?.polyline ?? (optimiseApplied ? optimiseResult?.polyline : null)
+
+  // ── Current location ──────────────────────────────────────────────────────
+
   async function handleUseCurrentLocation() {
     setLocating(true)
     setGeoError(null)
@@ -166,7 +320,8 @@ export default function SmartPlannerPage() {
     }
   }
 
-  // ── Visited status mutations (always user-confirmed) ──
+  // ── Visited status mutations ──────────────────────────────────────────────
+
   async function setVisited(
     dayId: string, activityId: string, status: VisitedStatus,
     confidence?: VisitedConfidence, source?: Activity['visitedSource'], locPointId?: string,
@@ -194,20 +349,195 @@ export default function SmartPlannerPage() {
     setVisited(dayId, activityId, 'skipped', undefined, 'manual')
   }
   function resetVisited(dayId: string, activityId: string) {
-    // Clearing the stored status lets live detection drive again.
     setVisited(dayId, activityId, 'not_visited', undefined, undefined, undefined)
   }
   function markVisitedFromCurrent(dayId: string, activityId: string) {
     setVisited(dayId, activityId, 'confirmed_visited', 'high', 'current_location')
   }
 
-  // ── AI generation ──
+  // ── Route optimise for remaining places ───────────────────────────────────
+
+  async function handleOptimiseRemaining() {
+    if (!analysis) return
+    const withCoords = analysis.remainingPlaces.filter((p) => p.lat != null && p.lng != null)
+    if (withCoords.length < 2) return
+
+    setOptimising(true)
+    setOptimiseError(null)
+    setOptimiseResult(null)
+    setOptimiseApplied(false)
+
+    const points: { id: string; name: string; lat: number; lng: number }[] = []
+    if (currentLocation) {
+      points.push({ id: 'current', name: 'Current Location', lat: currentLocation.lat, lng: currentLocation.lng })
+    }
+    withCoords.forEach((p) => points.push({ id: p.activityId, name: p.title, lat: p.lat!, lng: p.lng! }))
+
+    // Haversine chain for the original order (baseline).
+    let origHav = 0
+    for (let i = 0; i < points.length - 1; i++) {
+      origHav += haversineMeters(points[i]!.lat, points[i]!.lng, points[i + 1]!.lat, points[i + 1]!.lng)
+    }
+
+    try {
+      const res = await fetch('/api/maps/route/optimise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points, travelMode: 'driving', mode: 'fastest', keepFirstFixed: !!currentLocation }),
+      })
+
+      if (res.status === 503) {
+        // Maps not configured — Haversine nearest-neighbour fallback.
+        const sorted = nearestNeighbourSort(withCoords, currentLocation)
+        const sortedIds = sorted.map((p) => p.activityId)
+        const sortedPts = currentLocation
+          ? [currentLocation, ...sorted.map((p) => ({ lat: p.lat!, lng: p.lng! }))]
+          : sorted.map((p) => ({ lat: p.lat!, lng: p.lng! }))
+        let sortedHav = 0
+        for (let i = 0; i < sortedPts.length - 1; i++) {
+          sortedHav += haversineMeters(sortedPts[i]!.lat, sortedPts[i]!.lng, sortedPts[i + 1]!.lat, sortedPts[i + 1]!.lng)
+        }
+        setOptimisedRemainingIds(sortedIds)
+        setOptimiseResult({
+          originalDistanceKm: Math.round(origHav / 100) / 10,
+          optimisedDistanceKm: Math.round(sortedHav / 100) / 10,
+          distanceSavedKm: Math.round(Math.max(0, origHav - sortedHav) / 100) / 10,
+          originalDurationSeconds: 0,
+          optimisedDurationSeconds: 0,
+          durationSavedSeconds: 0,
+          optimisedOrder: sortedIds,
+          warnings: ['Road data unavailable — order estimated from straight-line distances.'],
+          method: 'haversine',
+        })
+        return
+      }
+
+      if (!res.ok) throw new Error('optimise_failed')
+      const data = await res.json() as OptimiseRouteResult
+      const optimisedIds = data.optimisedOrder.filter((id) => id !== 'current')
+      setOptimisedRemainingIds(optimisedIds)
+      setOptimiseResult({
+        originalDistanceKm: data.originalRouteDistanceMeters > 0
+          ? Math.round(data.originalRouteDistanceMeters / 100) / 10
+          : Math.round(origHav / 100) / 10,
+        optimisedDistanceKm: Math.round(data.optimisedRouteDistanceMeters / 100) / 10,
+        distanceSavedKm: Math.round(Math.max(0, data.distanceSavedMeters) / 100) / 10,
+        originalDurationSeconds: data.originalRouteDurationSeconds,
+        optimisedDurationSeconds: data.optimisedRouteDurationSeconds,
+        durationSavedSeconds: Math.max(0, data.durationSavedSeconds),
+        optimisedOrder: optimisedIds,
+        warnings: data.warnings,
+        method: 'road',
+        polyline: data.routePolyline,
+      })
+    } catch {
+      setOptimiseError('Route optimisation failed. Try again or proceed with itinerary order.')
+    } finally {
+      setOptimising(false)
+    }
+  }
+
+  function handleResetOptimise() {
+    setOptimiseResult(null)
+    setOptimisedRemainingIds(null)
+    setOptimiseApplied(false)
+    setOptimiseError(null)
+  }
+
+  // ── Calculate route preview for AI plan ──────────────────────────────────
+
+  async function handleCalculateRoutePreview() {
+    if (!analysis || editDays.length === 0) return
+
+    const allPlaces = [
+      ...analysis.visitedPlaces,
+      ...analysis.remainingPlaces,
+      ...analysis.skippedPlaces,
+    ]
+
+    const points: { id: string; name: string; lat: number; lng: number }[] = []
+    if (currentLocation) {
+      points.push({ id: 'current', name: 'Current Location', lat: currentLocation.lat, lng: currentLocation.lng })
+    }
+    for (const day of editDays) {
+      for (const act of day.activities) {
+        if (act._removed || act.isBreak) continue
+        const coords = lookupCoords(act.title, allPlaces)
+        if (coords) points.push({ id: act._key, name: act.title, lat: coords.lat, lng: coords.lng })
+      }
+    }
+
+    const stopCount = points.length - (currentLocation ? 1 : 0)
+
+    if (points.length < 2) {
+      setRoutePreview({
+        totalDistanceKm: 0,
+        durationText: '—',
+        stopCount,
+        method: 'haversine',
+        warnings: ['Not enough places with coordinates for a route preview.'],
+      })
+      return
+    }
+
+    setCalculatingRoute(true)
+    setRoutePreview(null)
+
+    // Haversine chain baseline.
+    let havMeters = 0
+    for (let i = 0; i < points.length - 1; i++) {
+      havMeters += haversineMeters(points[i]!.lat, points[i]!.lng, points[i + 1]!.lat, points[i + 1]!.lng)
+    }
+
+    try {
+      const res = await fetch('/api/maps/route/optimise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points, travelMode: 'driving', mode: 'fastest', keepFirstFixed: true }),
+      })
+
+      if (res.ok) {
+        const data = await res.json() as OptimiseRouteResult
+        const relevant = data.warnings.filter((w) => !w.includes('Optimised order saves'))
+        setRoutePreview({
+          totalDistanceKm: Math.round(data.optimisedRouteDistanceMeters / 100) / 10,
+          durationText: fmtDuration(data.optimisedRouteDurationSeconds),
+          stopCount,
+          method: 'road',
+          warnings: relevant,
+          polyline: data.routePolyline,
+        })
+      } else {
+        setRoutePreview({
+          totalDistanceKm: Math.round(havMeters / 100) / 10,
+          durationText: '—',
+          stopCount,
+          method: 'haversine',
+          warnings: ['Road data unavailable — showing approximate straight-line distance.'],
+        })
+      }
+    } catch {
+      setRoutePreview({
+        totalDistanceKm: Math.round(havMeters / 100) / 10,
+        durationText: '—',
+        stopCount,
+        method: 'haversine',
+        warnings: ['Route calculation failed — showing approximate straight-line distance.'],
+      })
+    } finally {
+      setCalculatingRoute(false)
+    }
+  }
+
+  // ── AI generation ──────────────────────────────────────────────────────────
+
   async function handleGenerate() {
     if (!trip || !analysis) return
     setGenerating(true)
     setAiError(null)
     setAiResult(null)
     setApplyNote(null)
+    setRoutePreview(null)
 
     const input: GapPlannerInput = {
       tripName: trip.name,
@@ -229,10 +559,11 @@ export default function SmartPlannerPage() {
       visitedPlaces: analysis.visitedPlaces.map((p) => ({
         title: p.title, category: p.category, lat: p.lat, lng: p.lng, date: p.date,
       })),
-      remainingPlaces: analysis.remainingPlaces.map((p) => ({
+      remainingPlaces: sortedRemainingPlaces.map((p) => ({
         title: p.title, category: p.category, lat: p.lat, lng: p.lng, date: p.date,
       })),
       constraints: constraints.trim() || undefined,
+      routeSummary,
     }
 
     try {
@@ -257,7 +588,8 @@ export default function SmartPlannerPage() {
     }
   }
 
-  // ── Editing the preview ──
+  // ── Editing the preview ────────────────────────────────────────────────────
+
   function toggleRemove(dayDate: string, key: string) {
     setEditDays((prev) => prev.map((d) => d.date === dayDate ? {
       ...d,
@@ -274,7 +606,8 @@ export default function SmartPlannerPage() {
     } : d))
   }
 
-  // ── Apply preview to the itinerary (only future/unprotected days) ──
+  // ── Apply preview to itinerary ─────────────────────────────────────────────
+
   async function handleApply() {
     if (!tripId || !trip) return
     const today = todayISO()
@@ -291,12 +624,6 @@ export default function SmartPlannerPage() {
       setApplyNote('All proposed days are in the past and were protected — nothing applied.')
       return
     }
-
-    const ok = window.confirm(
-      `Add ${applicable.reduce((n, d) => n + d.activities.length, 0)} activit${total === 1 ? 'y' : 'ies'} to ${applicable.length} day(s)? ` +
-      `Past/completed days are protected and will be skipped. Existing activities are kept.`,
-    )
-    if (!ok) return
 
     setApplying(true)
     const skippedDates: string[] = [...protectedDates]
@@ -334,11 +661,14 @@ export default function SmartPlannerPage() {
     setApplying(false)
     setAiResult(null)
     setEditDays([])
+    setRoutePreview(null)
     setApplyNote(
       `Added ${added} activit${added === 1 ? 'y' : 'ies'}.` +
       (skippedDates.length ? ` Skipped ${skippedDates.length} protected/unmatched day(s).` : ''),
     )
   }
+
+  // ── Loading skeleton ───────────────────────────────────────────────────────
 
   if (loading || !trip || !analysis) {
     return (
@@ -355,6 +685,14 @@ export default function SmartPlannerPage() {
   }
 
   const a = analysis
+  const remainingWithCoords = a.remainingPlaces.filter((p) => p.lat != null && p.lng != null)
+
+  // Pre-apply summary (future days only).
+  const today = todayISO()
+  const previewFutureDays = editDays.filter(
+    (d) => d.date >= today && d.activities.some((act) => !act._removed),
+  )
+  const previewPastDays = editDays.filter((d) => d.date < today)
 
   return (
     <AppShell back={`/trips/${tripId}`} tripId={tripId} title="Smart Planner" wide>
@@ -402,6 +740,35 @@ export default function SmartPlannerPage() {
           </div>
         </div>
 
+        {/* Map view toggle + canvas */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-2">
+              <MapIcon size={15} className="text-gray-400" />
+              <span className="text-sm font-bold text-gray-900">Trip map</span>
+              {mapMarkers.length > 0 && (
+                <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-semibold">
+                  {mapMarkers.length} place{mapMarkers.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            <Button size="sm" variant="secondary" onClick={() => setShowMap((v) => !v)}>
+              {showMap ? 'Hide map' : 'Show map'}
+            </Button>
+          </div>
+          {showMap && (
+            <div className="px-4 pb-4">
+              <SmartPlannerMap
+                markers={mapMarkers}
+                activeMarkerId={activeMapMarkerId}
+                onSelectMarker={setActiveMapMarkerId}
+                routePolyline={activePolyline ?? null}
+                heightPx={320}
+              />
+            </div>
+          )}
+        </div>
+
         {/* Current location card */}
         <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
@@ -438,15 +805,105 @@ export default function SmartPlannerPage() {
                   <Button size="sm" variant="ghost" onClick={() => setCurrentLocation(null)}>Clear</Button>
                 </div>
               </div>
-              {/* Nearby planned places */}
               <NearbyPlaces analysis={a} onMarkVisited={markVisitedFromCurrent} />
             </>
           )}
         </div>
 
-        {/* Remaining + Next best */}
+        {/* Optimise remaining plan */}
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <Route size={16} className="text-sky-500" />
+            <h2 className="text-sm font-bold text-gray-900">Optimise remaining plan</h2>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">
+            Reorder remaining places by shortest driving route
+            {currentLocation ? ' from your current location' : ''}.
+            {!mapsStatus.available && ' Using straight-line estimate (Maps not configured).'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={handleOptimiseRemaining}
+              disabled={optimising || remainingWithCoords.length < 2}
+            >
+              {optimising ? <Loader2 size={14} className="animate-spin" /> : <Route size={14} />}
+              {optimising ? 'Calculating…' : 'Optimise remaining plan'}
+            </Button>
+            {remainingWithCoords.length < 2 && (
+              <span className="text-[11px] text-gray-400 self-center">
+                Need ≥ 2 remaining places with coordinates
+              </span>
+            )}
+          </div>
+
+          {optimiseError && (
+            <p className="mt-2 text-xs text-amber-600 flex items-center gap-1.5">
+              <AlertTriangle size={12} /> {optimiseError}
+            </p>
+          )}
+
+          {optimiseResult && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-3">
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div className="rounded-xl bg-gray-50 p-3 text-center">
+                  <p className="text-[10px] text-gray-400 mb-1 font-semibold">Original order</p>
+                  <p className="text-lg font-black text-gray-800">{optimiseResult.originalDistanceKm} km</p>
+                  {optimiseResult.originalDurationSeconds > 0 && (
+                    <p className="text-[10px] text-gray-400 mt-0.5">{fmtDuration(optimiseResult.originalDurationSeconds)}</p>
+                  )}
+                </div>
+                <div className="rounded-xl bg-sky-50 p-3 text-center">
+                  <p className="text-[10px] text-sky-500 mb-1 font-semibold">Optimised</p>
+                  <p className="text-lg font-black text-sky-700">{optimiseResult.optimisedDistanceKm} km</p>
+                  {optimiseResult.optimisedDurationSeconds > 0 && (
+                    <p className="text-[10px] text-sky-500 mt-0.5">{fmtDuration(optimiseResult.optimisedDurationSeconds)}</p>
+                  )}
+                </div>
+              </div>
+
+              {(optimiseResult.distanceSavedKm > 0 || optimiseResult.durationSavedSeconds > 60) && (
+                <p className="text-xs text-emerald-600 font-semibold mb-2">
+                  ✓ Saves{optimiseResult.distanceSavedKm > 0 ? ` ≈${optimiseResult.distanceSavedKm} km` : ''}
+                  {optimiseResult.durationSavedSeconds > 60 ? ` · ${fmtDuration(optimiseResult.durationSavedSeconds)}` : ''} of travel
+                </p>
+              )}
+
+              <p className="text-[10px] text-gray-400 mb-2">
+                {optimiseResult.method === 'road' ? '🛣 Road-aware estimate' : '📐 Straight-line estimate'}
+                {' · '}{optimiseResult.optimisedOrder.length} stops
+              </p>
+
+              {optimiseResult.warnings.map((w, i) => (
+                <p key={i} className="text-[11px] text-amber-600 flex items-center gap-1 mb-0.5">
+                  <AlertTriangle size={10} /> {w}
+                </p>
+              ))}
+
+              {!optimiseApplied ? (
+                <Button size="sm" onClick={() => setOptimiseApplied(true)} className="mt-2">
+                  Apply optimised order
+                </Button>
+              ) : (
+                <div className="flex items-center gap-3 mt-2">
+                  <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                    <Check size={12} /> Optimised order applied to remaining list
+                  </span>
+                  <button
+                    onClick={handleResetOptimise}
+                    className="text-[11px] text-gray-400 hover:text-gray-600 underline"
+                  >
+                    Reset
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </div>
+
+        {/* Visited / Remaining grid */}
         <div className="grid lg:grid-cols-2 gap-4">
-          {/* Visited / remaining lists */}
+          {/* Visited */}
           <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
             <h2 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
               <MapPin size={15} className="text-emerald-500" /> Visited places
@@ -454,9 +911,18 @@ export default function SmartPlannerPage() {
             {a.visitedPlaces.length === 0 ? (
               <p className="text-xs text-gray-400 py-2">No places detected as visited yet. Add Travel History check-ins or confirm places below.</p>
             ) : (
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 max-h-72 overflow-y-auto">
                 {a.visitedPlaces.map((p) => (
-                  <PlaceRow key={p.activityId} title={p.title} day={p.dayNumber} status={p.status} confidence={p.confidence}>
+                  <PlaceRow
+                    key={p.activityId}
+                    title={p.title}
+                    day={p.dayNumber}
+                    status={p.status}
+                    confidence={p.confidence}
+                    activeId={activeMapMarkerId}
+                    onFocus={setActiveMapMarkerId}
+                    id={p.activityId}
+                  >
                     {p.status !== 'confirmed_visited' && (
                       <button onClick={() => confirmVisited(p.dayId, p.activityId)} className="text-emerald-600 hover:bg-emerald-50 rounded-lg p-1" title="Confirm visited">
                         <CheckCircle2 size={15} />
@@ -469,19 +935,53 @@ export default function SmartPlannerPage() {
                 ))}
               </div>
             )}
+            {a.skippedPlaces.length > 0 && (
+              <>
+                <p className="text-[10px] font-bold text-amber-500 mt-3 mb-1.5">SKIPPED</p>
+                <div className="space-y-1.5">
+                  {a.skippedPlaces.map((p) => (
+                    <PlaceRow
+                      key={p.activityId}
+                      title={p.title}
+                      day={p.dayNumber}
+                      status={p.status}
+                      id={p.activityId}
+                      activeId={activeMapMarkerId}
+                      onFocus={setActiveMapMarkerId}
+                    >
+                      <button onClick={() => resetVisited(p.dayId, p.activityId)} className="text-gray-400 hover:bg-gray-100 rounded-lg p-1" title="Restore">
+                        <RotateCcw size={14} />
+                      </button>
+                    </PlaceRow>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Remaining */}
           <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
             <h2 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
               <Circle size={15} className="text-gray-400" /> Remaining itinerary
+              {optimiseApplied && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-600">Optimised order</span>
+              )}
             </h2>
-            {a.remainingPlaces.length === 0 ? (
+            {sortedRemainingPlaces.length === 0 ? (
               <p className="text-xs text-gray-400 py-2">Nothing left — every planned place is visited or skipped. 🎉</p>
             ) : (
               <div className="space-y-1.5 max-h-72 overflow-y-auto">
-                {a.remainingPlaces.map((p) => (
-                  <PlaceRow key={p.activityId} title={p.title} day={p.dayNumber} status={p.status} distanceM={p.distanceFromCurrentMeters}>
+                {sortedRemainingPlaces.map((p) => (
+                  <PlaceRow
+                    key={p.activityId}
+                    title={p.title}
+                    day={p.dayNumber}
+                    status={p.status}
+                    distanceM={p.distanceFromCurrentMeters}
+                    id={p.activityId}
+                    activeId={activeMapMarkerId}
+                    onFocus={setActiveMapMarkerId}
+                  >
                     <button onClick={() => confirmVisited(p.dayId, p.activityId)} className="text-emerald-600 hover:bg-emerald-50 rounded-lg p-1" title="Mark visited">
                       <CheckCircle2 size={15} />
                     </button>
@@ -491,6 +991,13 @@ export default function SmartPlannerPage() {
                   </PlaceRow>
                 ))}
               </div>
+            )}
+            {optimiseApplied && optimiseResult && (
+              <p className="text-[10px] text-sky-500 mt-2 flex items-center gap-1">
+                <Route size={10} />
+                {fmtDistance(optimiseResult.optimisedDistanceKm * 1000)} total travel
+                {optimiseResult.optimisedDurationSeconds > 0 && ` · ${fmtDuration(optimiseResult.optimisedDurationSeconds)}`}
+              </p>
             )}
           </div>
         </div>
@@ -504,6 +1011,7 @@ export default function SmartPlannerPage() {
           </div>
           <p className="text-xs text-gray-500 mb-3">
             Generate a plan for what&apos;s left. You&apos;ll get a preview to edit — nothing is saved until you apply.
+            {optimiseApplied && <span className="text-sky-600 ml-1">Using optimised travel order.</span>}
           </p>
 
           {/* Mode */}
@@ -611,12 +1119,61 @@ export default function SmartPlannerPage() {
               <p key={i} className="text-[11px] text-amber-600 flex items-center gap-1 mt-0.5"><AlertTriangle size={10} /> {w}</p>
             ))}
 
+            {/* Route preview */}
+            <div className="mt-3 mb-1">
+              <Button size="sm" variant="secondary" onClick={handleCalculateRoutePreview} disabled={calculatingRoute}>
+                {calculatingRoute ? <Loader2 size={13} className="animate-spin" /> : <Route size={13} />}
+                {calculatingRoute ? 'Calculating route…' : 'Calculate route for preview'}
+              </Button>
+              {routePreview && (
+                <div className="mt-2 bg-sky-50 rounded-xl p-3">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-sky-700">
+                    <span>📍 {routePreview.stopCount} stop{routePreview.stopCount !== 1 ? 's' : ''}</span>
+                    {routePreview.totalDistanceKm > 0 && <span>🛣 {routePreview.totalDistanceKm} km</span>}
+                    {routePreview.durationText !== '—' && <span>⏱ {routePreview.durationText}</span>}
+                    <span className="text-[10px] text-sky-500 font-normal">
+                      {routePreview.method === 'road' ? 'Road estimate' : 'Straight-line estimate'}
+                    </span>
+                  </div>
+                  {routePreview.warnings.map((w, i) => (
+                    <p key={i} className="text-[11px] text-amber-600 mt-1 flex items-center gap-1"><AlertTriangle size={10} /> {w}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Pre-apply summary */}
+            {previewFutureDays.length > 0 && (
+              <div className="bg-violet-50 rounded-xl p-3 mt-3 text-xs text-gray-600">
+                <p className="font-bold text-gray-800 mb-1.5">Will add to itinerary:</p>
+                {previewFutureDays.map((d) => {
+                  const acts = d.activities.filter((act) => !act._removed)
+                  if (acts.length === 0) return null
+                  return (
+                    <p key={d.date} className="mb-0.5 leading-relaxed">
+                      <span className="font-semibold">{formatDate(d.date)}</span>
+                      {': '}
+                      <span className="text-violet-700 font-semibold">+{acts.length}</span>
+                      {' '}
+                      <span className="text-gray-500">{acts.map((act) => act.title).join(', ')}</span>
+                    </p>
+                  )
+                })}
+                {previewPastDays.length > 0 && (
+                  <p className="mt-1 text-amber-600 flex items-center gap-1">
+                    <AlertTriangle size={10} />
+                    {previewPastDays.length} past day(s) will be skipped (protected).
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-2 mt-4">
               <Button onClick={handleApply} disabled={applying} className="flex-1">
                 {applying ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                 {applying ? 'Applying…' : 'Apply to itinerary'}
               </Button>
-              <Button variant="secondary" onClick={() => { setAiResult(null); setEditDays([]) }} disabled={applying}>
+              <Button variant="secondary" onClick={() => { setAiResult(null); setEditDays([]); setRoutePreview(null) }} disabled={applying}>
                 Discard
               </Button>
             </div>
@@ -631,7 +1188,7 @@ export default function SmartPlannerPage() {
   )
 }
 
-// ── Small presentational helpers ──
+// ── Presentational helpers ────────────────────────────────────────────────────
 
 function StatCard({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: 'primary' | 'violet' | 'emerald' | 'amber' }) {
   const toneCls = {
@@ -650,12 +1207,19 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
 }
 
 function PlaceRow({
-  title, day, status, confidence, distanceM, children,
+  id, title, day, status, confidence, distanceM, activeId, onFocus, children,
 }: {
-  title: string; day: number; status: VisitedStatus; confidence?: VisitedConfidence; distanceM?: number; children?: React.ReactNode
+  id: string; title: string; day: number; status: VisitedStatus
+  confidence?: VisitedConfidence; distanceM?: number
+  activeId?: string | null; onFocus?: (id: string) => void
+  children?: React.ReactNode
 }) {
+  const isActive = activeId === id
   return (
-    <div className="flex items-center gap-2 py-1">
+    <div
+      className={`flex items-center gap-2 py-1 rounded-lg px-1 -mx-1 transition-colors cursor-pointer ${isActive ? 'bg-sky-50' : 'hover:bg-gray-50'}`}
+      onClick={() => onFocus?.(id)}
+    >
       <div className="flex-1 min-w-0">
         <p className="text-sm text-gray-800 truncate">{title}</p>
         <div className="flex items-center gap-1.5 mt-0.5">
@@ -667,6 +1231,9 @@ function PlaceRow({
           )}
           {status === 'confirmed_visited' && (
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600">visited</span>
+          )}
+          {status === 'skipped' && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600">skipped</span>
           )}
           {distanceM != null && (
             <span className="text-[10px] text-sky-500 font-semibold">
@@ -685,7 +1252,6 @@ function NearbyPlaces({
 }: {
   analysis: GapAnalysis; onMarkVisited: (dayId: string, activityId: string) => void
 }) {
-  // Planned places sorted by distance from current location (computed in analysis).
   const nearby = [...analysis.remainingPlaces, ...analysis.visitedPlaces]
     .filter((p) => p.distanceFromCurrentMeters != null)
     .sort((x, y) => (x.distanceFromCurrentMeters ?? 0) - (y.distanceFromCurrentMeters ?? 0))

@@ -1281,6 +1281,8 @@ export interface GapPlannerInput {
   visitedPlaces: GapPlannerPlaceRef[]
   remainingPlaces: GapPlannerPlaceRef[]
   constraints?: string
+  /** Phase 15B: route summary when the user has run route optimisation. */
+  routeSummary?: GapPlanRouteSummary
 }
 
 /** A single AI-proposed activity in a preview (never auto-applied). */
@@ -1322,4 +1324,23 @@ export interface GapPlannerResponse {
   isMock: boolean
   provider: 'anthropic' | 'mock'
   model: string
+}
+
+// ── Route-aware Gap Planner (Phase 15B) ──────────────────────────────────────
+//
+// Route optimisation for the Smart Planner remaining places. Aggregates the
+// OptimiseRouteResult into a compact, AI-safe summary so the gap planner can
+// factor travel distance/time into its suggestions.
+
+/**
+ * Compact route summary attached to GapPlannerInput when the user has run
+ * "Optimise remaining plan". Contains no precise GPS coordinates — only
+ * aggregate distance/duration figures safe to include in an AI prompt.
+ */
+export interface GapPlanRouteSummary {
+  stopCount: number
+  totalDistanceKm: number
+  totalDurationText: string
+  optimisationMethod: RouteOptimisationMethod
+  warnings: string[]
 }
