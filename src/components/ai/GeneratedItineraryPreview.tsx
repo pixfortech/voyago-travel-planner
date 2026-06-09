@@ -392,28 +392,54 @@ export default function GeneratedItineraryPreview({
   }
 
   // ── Auto-run: enrich + optimise before the final preview ──────────────────
+  //
+  // React 18 Strict Mode double-invokes effects: cleanup fires between run 1
+  // and run 2. Run 2 exits via the autoRanForRef guard. Run 1's async must
+  // still clear loading state — so all setX(false) calls go in a finally
+  // block that is never gated on `cancelled`. `cancelled` is only used to
+  // skip expensive follow-on network work (route optimisation).
 
   useEffect(() => {
     if (!autoEnrich || !mapsAvailable) return
     if (autoRanForRef.current === result) return
     autoRanForRef.current = result
     let cancelled = false
-    ;(async () => {
-      setAutoRunning(true)
-      setEnriching(true)
-      const r = await enrichPlaces(true)
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const clearLoading = () => {
+      setAutoRunning(false)
       setEnriching(false)
-      if (cancelled) return
-      if (r.unavailable) {
-        setEnrichNote('Google Places is not configured — places shown are AI suggestions and remain unverified.')
-        setAutoRunning(false)
-        return
+      setOptimisingAll(false)
+    }
+
+    // Safety net: clear loading state after 30 s no matter what.
+    timeoutId = setTimeout(clearLoading, 30_000)
+
+    ;(async () => {
+      try {
+        setAutoRunning(true)
+        setEnriching(true)
+        const r = await enrichPlaces(true)
+        setEnriching(false)
+        if (r.unavailable) {
+          setEnrichNote('Google Places is not configured — places shown are AI suggestions and remain unverified.')
+          return
+        }
+        setEnrichNote(r.done > 0 ? `Auto-verified ${r.done} place${r.done === 1 ? '' : 's'} with Google.` : 'Could not match places automatically — try “Resolve unverified”.')
+        // Skip route optimisation if the effect was already cleaned up.
+        if (!cancelled) await optimiseAllDays()
+      } catch {
+        // swallow; loading state is cleared in finally regardless
+      } finally {
+        if (timeoutId != null) clearTimeout(timeoutId)
+        clearLoading()
       }
-      setEnrichNote(r.done > 0 ? `Auto-verified ${r.done} place${r.done === 1 ? '' : 's'} with Google.` : 'Could not match places automatically — try “Resolve unverified”.')
-      await optimiseAllDays()
-      if (!cancelled) setAutoRunning(false)
     })()
-    return () => { cancelled = true }
+
+    return () => {
+      cancelled = true
+      if (timeoutId != null) clearTimeout(timeoutId)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, autoEnrich, mapsAvailable])
 
