@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import {
   MapPin, Calendar, Users, Wallet, Map, Pencil, Trash2, Share2,
   Sparkles, Camera, Lock, Plus, ChevronRight, CheckCircle2, Circle,
-  TrendingUp, UserPlus, Navigation, Play, FileText, MessageSquare,
+  TrendingUp, UserPlus, Navigation, Play, FileText, MessageSquare, CheckSquare,
 } from 'lucide-react'
 import { getTrip, deleteTrip, getExpenses, getMemories } from '@/lib/firestore'
 import { getRecentTripComments } from '@/lib/comments'
@@ -382,6 +382,16 @@ export default function TripOverviewPage() {
                   <p className="text-xs text-gray-400 mt-0.5">Export &amp; print</p>
                 </div>
               </Link>
+
+              <Link href={`/trips/${tripId}/planning`}>
+                <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-200 hover:-translate-y-0.5 transition-all cursor-pointer">
+                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center mb-3 shadow-sm shadow-indigo-500/20">
+                    <CheckSquare size={20} className="text-white" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-sm">Tasks &amp; Polls</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Plan &amp; decide together</p>
+                </div>
+              </Link>
             </div>
           </motion.div>
 
@@ -632,6 +642,19 @@ export default function TripOverviewPage() {
                     Reports &amp; Exports
                   </span>
                   <ChevronRight size={13} className="text-gray-300 group-hover:text-teal-400 transition-colors" />
+                </Link>
+
+                <Link
+                  href={`/trips/${tripId}/planning`}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-indigo-50 group transition-colors"
+                >
+                  <div className="w-7 h-7 bg-indigo-50 group-hover:bg-indigo-100 rounded-lg flex items-center justify-center transition-colors">
+                    <CheckSquare size={13} className="text-indigo-600" />
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700 group-hover:text-indigo-700 transition-colors flex-1">
+                    Tasks &amp; Polls
+                  </span>
+                  <ChevronRight size={13} className="text-gray-300 group-hover:text-indigo-400 transition-colors" />
                 </Link>
               </div>
             </div>

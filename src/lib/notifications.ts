@@ -19,7 +19,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import type { InAppNotification, Trip, TripMemory, TripComment, Traveller } from '@/types'
+import type { InAppNotification, Trip, TripMemory, TripComment, Traveller, TripTask } from '@/types'
 
 /**
  * Create tag notifications for all tagged travellers that have a linked user account.
@@ -149,6 +149,48 @@ export async function createMentionNotifications(params: {
       )
     })
   )
+}
+
+/**
+ * Notify a member that a task was assigned to them.
+ * Skips self-assignment (the actor assigning a task to themselves) so users are
+ * never notified about their own action. Best-effort; failures are swallowed by
+ * the caller. Returns true when a notification was actually created.
+ */
+export async function createTaskAssignmentNotification(params: {
+  task: TripTask
+  trip: Trip
+  actorUid: string
+  actorName: string
+}): Promise<boolean> {
+  const { task, trip, actorUid, actorName } = params
+  const recipient = task.assignedToUid
+  if (!recipient) return false
+  if (recipient === actorUid) return false  // don't notify the person doing the assigning
+
+  const notification: Omit<InAppNotification, 'id'> = {
+    userId: recipient,
+    tripId: trip.id,
+    taskId: task.id,
+    type: 'task_assigned',
+    title: 'You were assigned a task',
+    message: `${actorName} assigned you "${task.title}" in ${trip.name}`,
+    read: false,
+    createdAt: new Date().toISOString(),
+    actorUid,
+    actorName,
+    tripName: trip.name,
+  }
+
+  try {
+    await addDoc(
+      collection(db, 'users', recipient, 'notifications'),
+      notification,
+    )
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Fetch all notifications for a user, newest first. Returns [] on error. */

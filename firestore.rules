@@ -171,12 +171,14 @@ service cloud.firestore {
 
       allow delete: if isSignedIn() && request.auth.uid in resource.data.members;
 
-      // Nested collections (days, expenses, locations, memories, comments, reactions, …)
-      // inherit trip membership. This covers Phase 11 Comments & Reactions:
-      //   trips/{tripId}/comments/{commentId}
-      //   trips/{tripId}/reactions/{reactionId}
-      // Edit/soft-delete ownership (authorUid) is enforced at the UI layer, consistent
-      // with Phase 8 role enforcement. The trip owner may moderate any comment via UI.
+      // Nested collections inherit trip membership. This covers:
+      //   Phase 11 — trips/{tripId}/comments/{commentId}, trips/{tripId}/reactions/{reactionId}
+      //   Phase 12 — trips/{tripId}/tasks/{taskId},        trips/{tripId}/polls/{pollId}
+      // Field-level ownership is enforced at the UI layer (consistent with Phase 8):
+      //   • Comments: only the author edits/soft-deletes; owner may moderate.
+      //   • Tasks: creator/assignee/owner manage status, priority, assignment.
+      //   • Polls: creator/owner close/finalise; members vote only as themselves.
+      // Planning data is private to trip members and never exposed on public shares.
       match /{sub=**} {
         allow read, write: if isTripMember(tripId);
       }

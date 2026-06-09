@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Map, Wallet, Pencil, Share2, ChevronLeft,
+  LayoutDashboard, Map, Wallet, CheckSquare, Pencil, Share2, ChevronLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -15,6 +15,7 @@ export default function TripSubNav({ tripId }: { tripId: string }) {
     { href: `/trips/${tripId}`,           label: 'Overview',  icon: <LayoutDashboard size={15} />, exact: true },
     { href: `/trips/${tripId}/itinerary`, label: 'Itinerary', icon: <Map size={15} /> },
     { href: `/trips/${tripId}/budget`,    label: 'Budget',    icon: <Wallet size={15} /> },
+    { href: `/trips/${tripId}/planning`,  label: 'Tasks',     icon: <CheckSquare size={15} /> },
   ]
 
   const actionTabs = [

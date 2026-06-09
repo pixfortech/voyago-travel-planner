@@ -674,7 +674,7 @@ export interface OptimiseRoutePoint {
 // Trip members may create notifications for other members via the tag flow.
 // No push notifications or email in this phase — in-app bell only.
 
-export type NotificationType = 'memory_tagged' | 'comment_mention'
+export type NotificationType = 'memory_tagged' | 'comment_mention' | 'task_assigned'
 
 export interface InAppNotification {
   id: string
@@ -686,6 +686,8 @@ export interface InAppNotification {
   /** Phase 11: where the comment lives — used to route the notification tap */
   targetType?: CommentTargetType
   targetId?: string
+  /** Phase 12: task that triggered this assignment notification */
+  taskId?: string
   type: NotificationType
   title: string
   message: string
@@ -736,6 +738,97 @@ export interface TripReaction {
   /** One of the six supported emoji: 👍 ❤️ 😂 😮 ✅ ❓ */
   emoji: string
   createdAt: string     // ISO
+}
+
+// ── Tasks, Polls & Voting (Phase 12) ─────────────────────────────────────────
+//
+// Tasks are stored as trips/{tripId}/tasks/{taskId}.
+// Polls are stored as trips/{tripId}/polls/{pollId} (options embedded in the doc).
+// Both inherit trip membership via the existing wildcard rule:
+//   match /{sub=**} { allow read, write: if isTripMember(tripId); }
+// Planning data is NEVER exposed on public share pages.
+
+export type TaskStatus = 'todo' | 'in_progress' | 'done' | 'cancelled'
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
+export type TaskCategory =
+  | 'booking'
+  | 'payment'
+  | 'packing'
+  | 'documents'
+  | 'transport'
+  | 'food'
+  | 'shopping'
+  | 'route'
+  | 'memories'
+  | 'general'
+
+/** A trip task / responsibility, optionally assigned to a member and linked to trip data. */
+export interface TripTask {
+  id: string
+  tripId: string
+  title: string
+  description?: string
+  status: TaskStatus
+  priority: TaskPriority
+  category: TaskCategory
+  /** Assigned member uid + denormalised name (null when unassigned). */
+  assignedToUid?: string | null
+  assignedToName?: string | null
+  createdByUid: string
+  createdByName: string
+  linkedActivityId?: string
+  linkedExpenseId?: string
+  linkedMemoryId?: string
+  dueDate?: string       // YYYY-MM-DD
+  createdAt: string      // ISO
+  updatedAt?: string     // ISO
+  completedAt?: string   // ISO — set when status → done
+}
+
+export type PollType =
+  | 'place'
+  | 'activity'
+  | 'restaurant'
+  | 'hotel'
+  | 'route'
+  | 'budget'
+  | 'date_time'
+  | 'general'
+
+export type PollStatus = 'open' | 'closed' | 'finalised'
+
+/** A single voteable option within a poll. Votes are stored as an array of voter uids. */
+export interface PollOption {
+  id: string
+  label: string
+  description?: string
+  placeName?: string
+  estimatedCost?: number
+  linkedActivityId?: string
+  /** Voter uids — never emails. Resolved to member names client-side. */
+  votes: string[]
+  createdAt: string      // ISO
+}
+
+/** A group decision poll. Options are embedded so a single read renders the whole poll. */
+export interface TripPoll {
+  id: string
+  tripId: string
+  title: string
+  description?: string
+  type: PollType
+  status: PollStatus
+  options: PollOption[]
+  createdByUid: string
+  createdByName: string
+  allowMultipleVotes: boolean
+  closesAt?: string      // ISO — optional deadline (informational)
+  linkedActivityId?: string
+  linkedRouteDayKey?: string
+  /** Set when the poll is finalised — the winning option id. */
+  finalisedOptionId?: string
+  createdAt: string      // ISO
+  updatedAt?: string     // ISO
 }
 
 /** Result returned by POST /api/maps/route/optimise. */

@@ -701,6 +701,57 @@ place search, or memory uploads.
 
 ---
 
+## Tasks, Polls & Voting (Phase 12)
+
+Trip members can organise responsibilities and make group decisions from a
+dedicated **Tasks & Polls** page at `/trips/[tripId]/planning` (also reachable
+from the Overview Explore grid, Quick Actions, and the desktop "Tasks" tab).
+
+**Tasks**
+
+- Create tasks with title, description, priority (low/medium/high/urgent),
+  category (booking, payment, packing, documents, transport, food, shopping,
+  route, memories, general), optional due date, and an optional link to an
+  itinerary activity.
+- Assign a task to any trip member; change status (to do, in progress, done,
+  cancelled) and priority inline.
+- Summary cards show total, pending, in progress, done, and overdue counts.
+- Filters: all, assigned to me, pending, completed, high priority.
+- Field edits are limited in the UI to the task creator, current assignee, or
+  the trip owner.
+
+**Polls & voting**
+
+- Create polls (place, activity, restaurant, hotel, route, budget, date/time,
+  general) with two or more options; members can add more options while the
+  poll is open.
+- Single-vote by default, with an optional "allow multiple votes" mode.
+- Live vote counts, percentage bars, and a "who voted" breakdown visible to
+  trip members only (voter uids are resolved to member names; **no emails are
+  stored**).
+- The poll creator or trip owner can close, reopen, or **finalise** a poll on a
+  winning option, which is clearly marked. Finalising never modifies the
+  itinerary or route automatically.
+
+**Notifications** — when a task is assigned to another member, an in-app
+notification is created (existing bell model, no push/email). Users are never
+notified about assigning a task to themselves.
+
+**Privacy** — tasks, polls, and votes are stored under `trips/{tripId}/tasks`
+and `trips/{tripId}/polls`, are readable/writable only by trip members (existing
+`isTripMember` rule), and are **never** included in public share snapshots.
+
+If you changed `firestore.rules`, redeploy them:
+
+```
+firebase deploy --only firestore:rules
+```
+
+(No new rules were required for Phase 12 — the existing trip-member wildcard
+rule already covers the `tasks` and `polls` subcollections.)
+
+---
+
 ## Scripts
 
 | Command         | Description                          |

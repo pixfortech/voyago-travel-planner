@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, BellOff, Camera, MessageSquare, Check } from 'lucide-react'
+import { Bell, BellOff, Camera, MessageSquare, CheckSquare, Check } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import {
   getNotifications,
@@ -12,6 +12,7 @@ import {
 import type { InAppNotification } from '@/types'
 
 function notificationLink(n: InAppNotification): string {
+  if (n.type === 'task_assigned') return `/trips/${n.tripId}/planning`
   if (n.type === 'memory_tagged' || n.targetType === 'memory') {
     return `/trips/${n.tripId}/memories`
   }
@@ -140,9 +141,15 @@ export default function NotificationBell() {
                     !n.read ? 'bg-blue-50/40' : ''
                   }`}
                 >
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${n.type === 'comment_mention' ? 'bg-primary-50' : 'bg-rose-100'}`}>
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                    n.type === 'comment_mention' ? 'bg-primary-50'
+                    : n.type === 'task_assigned' ? 'bg-indigo-50'
+                    : 'bg-rose-100'
+                  }`}>
                     {n.type === 'comment_mention'
                       ? <MessageSquare size={12} className="text-primary-600" />
+                      : n.type === 'task_assigned'
+                      ? <CheckSquare size={12} className="text-indigo-600" />
                       : <Camera size={12} className="text-rose-500" />
                     }
                   </div>
