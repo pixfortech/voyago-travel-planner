@@ -1,0 +1,77 @@
+# Settings for Backend (on Cloud Run).
+# See https://firebase.google.com/docs/app-hosting/configure#cloud-run
+runConfig:
+  minInstances: 0
+  # maxInstances: 100
+  # concurrency: 80
+  # cpu: 1
+  # memoryMiB: 512
+
+# Environment variables and secrets.
+# Settings for Backend (on Cloud Run).
+runConfig:
+  minInstances: 0
+
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: "AIzaSyDUNGaUtnMDn4fmtkzAbKGms2HVqXZdJ1U"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: "voyago-travel-planner-ai.firebaseapp.com"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: "voyago-travel-planner-ai"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: "voyago-travel-planner-ai.firebasestorage.app"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "579482732347"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:579482732347:web:5acd4ec7e215052e97d91e"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FLAG_MAP_FEATURES
+    value: "true"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+    value: "AIzaSyAVgP_8ckQ1fJ64lbvh7xDQPSLyAOmy-0Q"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: AI_PROVIDER
+    value: "anthropic"
+    availability:
+      - RUNTIME
+
+  - variable: GOOGLE_MAPS_API_KEY
+    secret: googleMapsApiKey
+    availability:
+      - RUNTIME
+
+  - variable: ANTHROPIC_API_KEY
+    secret: anthropicApiKey
+    availability:
+      - RUNTIME
