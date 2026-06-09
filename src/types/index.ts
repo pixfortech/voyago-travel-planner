@@ -141,6 +141,9 @@ export interface Activity {
   lng?: number
   // Phase 14 — saved AI food/café intelligence (optional; only for food places).
   foodInsight?: FoodPlaceInsight
+  // Phase 14 extra — smart category auto-selection from Google place types.
+  suggestedCategorySource?: 'google_place_type' | 'manual'
+  detectedGoogleTypes?: string[]
 }
 
 export interface ItineraryDay {
@@ -512,6 +515,8 @@ export interface PlaceSearchResult {
   priceLevel?: number
   lat: number
   lng: number
+  /** Google place types (e.g. 'restaurant', 'tourist_attraction') for category auto-suggestion. */
+  types?: string[]
 }
 
 /** One ordered leg between two routed activities. */

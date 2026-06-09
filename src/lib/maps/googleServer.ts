@@ -71,6 +71,7 @@ interface RawPlace {
   userRatingCount?: number
   priceLevel?: string
   location?: { latitude?: number; longitude?: number }
+  types?: string[]
 }
 
 /**
@@ -91,7 +92,7 @@ export async function searchPlaces(
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': key,
       'X-Goog-FieldMask':
-        'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.location',
+        'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.location,places.types',
     },
     body: JSON.stringify({
       textQuery: query,
@@ -120,6 +121,7 @@ export async function searchPlaces(
       priceLevel: p.priceLevel ? PRICE_LEVEL_MAP[p.priceLevel] : undefined,
       lat: p.location!.latitude as number,
       lng: p.location!.longitude as number,
+      types: Array.isArray(p.types) ? p.types : undefined,
     }))
 }
 

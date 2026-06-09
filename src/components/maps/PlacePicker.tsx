@@ -16,6 +16,8 @@ export interface SelectedPlace {
   priceLevel?: number
   lat: number
   lng: number
+  /** Google place types forwarded for category auto-suggestion. */
+  placeTypes?: string[]
 }
 
 interface PlacePickerProps {
@@ -91,6 +93,7 @@ export default function PlacePicker({
       priceLevel: p.priceLevel,
       lat: p.lat,
       lng: p.lng,
+      placeTypes: p.types,
     })
     setQuery('')
     setResults([])

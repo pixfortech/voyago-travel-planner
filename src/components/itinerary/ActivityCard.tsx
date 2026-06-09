@@ -97,6 +97,11 @@ export default function ActivityCard({
                 ⚠ Conflict
               </span>
             )}
+            {activity.suggestedCategorySource === 'google_place_type' && (
+              <span className="text-[9px] font-semibold text-primary-500 bg-primary-50 px-1.5 py-0.5 rounded-full">
+                Auto
+              </span>
+            )}
           </div>
 
           {placeLine && (

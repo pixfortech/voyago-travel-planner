@@ -7,6 +7,7 @@ import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import PlacePicker, { type SelectedPlace } from '@/components/maps/PlacePicker'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
+import { mapPlaceTypesToCategory } from '@/lib/maps/categoryMapping'
 import { activityCategoryIcon } from '@/lib/utils'
 import type { ActivityType, ActivityCategory, BookingStatus, Activity } from '@/types'
 
@@ -83,6 +84,10 @@ export default function AddActivityModal({
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [titleError, setTitleError] = useState('')
+  /** True only when category was auto-set from a Google place selected this session. */
+  const [suggestedByGoogle, setSuggestedByGoogle] = useState(false)
+  /** True when the user explicitly clicked a category (overriding any auto-suggestion). */
+  const [userPickedCategory, setUserPickedCategory] = useState(false)
 
   // Pre-fill fields when editing
   useEffect(() => {
@@ -101,6 +106,7 @@ export default function AddActivityModal({
           priceLevel: editActivity.priceLevel,
           lat: editActivity.lat,
           lng: editActivity.lng,
+          placeTypes: editActivity.detectedGoogleTypes,
         })
       } else {
         setSelectedPlace(null)
@@ -121,6 +127,9 @@ export default function AddActivityModal({
       setBookingStatus('planned')
       setNotes('')
     }
+    // Reset suggestion state on every open/edit change
+    setSuggestedByGoogle(false)
+    setUserPickedCategory(false)
     setTitleError('')
   }, [editActivity, open])
 
@@ -155,6 +164,13 @@ export default function AddActivityModal({
     const resolvedLocation = selectedPlace
       ? selectedPlace.placeName
       : locationName.trim() || undefined
+    const suggestedCategorySource: Activity['suggestedCategorySource'] = (() => {
+      if (suggestedByGoogle) return 'google_place_type'
+      if (userPickedCategory) return 'manual'
+      // Not touched this session — preserve original for edits, omit for new
+      return editActivity?.suggestedCategorySource
+    })()
+
     const activityData: Omit<Activity, 'id'> = {
       type: CATEGORY_TO_TYPE[category],
       category,
@@ -178,6 +194,9 @@ export default function AddActivityModal({
       priceLevel: selectedPlace?.priceLevel,
       lat: selectedPlace?.lat,
       lng: selectedPlace?.lng,
+      // Phase 14 extra — category auto-suggestion metadata
+      suggestedCategorySource,
+      detectedGoogleTypes: selectedPlace?.placeTypes,
     }
     await onSave(activityData)
     setSaving(false)
@@ -197,7 +216,11 @@ export default function AddActivityModal({
               <button
                 key={cat.key}
                 type="button"
-                onClick={() => setCategory(cat.key)}
+                onClick={() => {
+                  setCategory(cat.key)
+                  setSuggestedByGoogle(false)
+                  setUserPickedCategory(true)
+                }}
                 className={`flex flex-col items-center gap-1 p-2 rounded-xl border transition-all ${
                   category === cat.key
                     ? 'bg-primary-500 text-white border-primary-500'
@@ -211,6 +234,11 @@ export default function AddActivityModal({
               </button>
             ))}
           </div>
+          {suggestedByGoogle && (
+            <p className="text-xs text-primary-600 mt-1.5">
+              Category suggested from Google place type. You can change it.
+            </p>
+          )}
         </div>
 
         {/* Title */}
@@ -229,8 +257,27 @@ export default function AddActivityModal({
           locationName={locationName}
           onLocationNameChange={setLocationName}
           selectedPlace={selectedPlace}
-          onSelectPlace={(place) => { setSelectedPlace(place); setLocationName(place.placeName) }}
-          onClearPlace={() => setSelectedPlace(null)}
+          onSelectPlace={(place) => {
+            setSelectedPlace(place)
+            setLocationName(place.placeName)
+            // Auto-suggest category from Google place types
+            if (place.placeTypes && place.placeTypes.length > 0) {
+              const suggested = mapPlaceTypesToCategory(place.placeTypes)
+              if (suggested !== 'other') {
+                setCategory(suggested)
+                setSuggestedByGoogle(true)
+                setUserPickedCategory(false)
+              } else {
+                setSuggestedByGoogle(false)
+              }
+            } else {
+              setSuggestedByGoogle(false)
+            }
+          }}
+          onClearPlace={() => {
+            setSelectedPlace(null)
+            setSuggestedByGoogle(false)
+          }}
         />
 
         {/* Times */}
