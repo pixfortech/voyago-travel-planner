@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import {
   MapPin, Calendar, Users, Wallet, Map, Pencil, Trash2, Share2,
   Sparkles, Camera, Lock, Plus, ChevronRight, CheckCircle2, Circle,
-  TrendingUp, UserPlus, Navigation, Play,
+  TrendingUp, UserPlus, Navigation, Play, FileText,
 } from 'lucide-react'
 import { getTrip, deleteTrip, getExpenses, getMemories } from '@/lib/firestore'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
@@ -368,6 +368,16 @@ export default function TripOverviewPage() {
                   <p className="text-xs text-gray-400 mt-0.5">Animate your journey</p>
                 </div>
               </Link>
+
+              <Link href={`/trips/${tripId}/reports`}>
+                <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-teal-200 hover:-translate-y-0.5 transition-all cursor-pointer">
+                  <div className="w-10 h-10 bg-gradient-to-br from-teal-500 to-emerald-600 rounded-xl flex items-center justify-center mb-3 shadow-sm shadow-teal-500/20">
+                    <FileText size={20} className="text-white" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-sm">Reports</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Export &amp; print</p>
+                </div>
+              </Link>
             </div>
           </motion.div>
 
@@ -605,6 +615,19 @@ export default function TripOverviewPage() {
                     Invite Members
                   </span>
                   <ChevronRight size={13} className="text-gray-300 group-hover:text-violet-400 transition-colors" />
+                </Link>
+
+                <Link
+                  href={`/trips/${tripId}/reports`}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-teal-50 group transition-colors"
+                >
+                  <div className="w-7 h-7 bg-teal-50 group-hover:bg-teal-100 rounded-lg flex items-center justify-center transition-colors">
+                    <FileText size={13} className="text-teal-600" />
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700 group-hover:text-teal-700 transition-colors flex-1">
+                    Reports &amp; Exports
+                  </span>
+                  <ChevronRight size={13} className="text-gray-300 group-hover:text-teal-400 transition-colors" />
                 </Link>
               </div>
             </div>
