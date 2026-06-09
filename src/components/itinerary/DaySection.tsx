@@ -16,6 +16,8 @@ interface DaySectionProps {
   onToggleConfirm: (dayId: string, activityId: string, confirmed: boolean) => void
   onCommentsClick?: (activityId: string, activityTitle: string) => void
   onFoodInsightClick?: (dayId: string, activity: Activity) => void
+  /** Activity IDs detected as likely visited (Phase 15A) — display only. */
+  likelyVisitedIds?: Set<string>
 }
 
 function detectConflicts(activities: Activity[]): Set<string> {
@@ -45,6 +47,7 @@ export default function DaySection({
   onToggleConfirm,
   onCommentsClick,
   onFoodInsightClick,
+  likelyVisitedIds,
 }: DaySectionProps) {
   const [expanded, setExpanded] = useState(true)
 
@@ -159,6 +162,7 @@ export default function DaySection({
                                     ? () => onFoodInsightClick(day.id, activity)
                                     : undefined
                                 }
+                                likelyVisited={likelyVisitedIds?.has(activity.id)}
                               />
                             </div>
                           </div>
@@ -199,6 +203,7 @@ export default function DaySection({
                                 ? () => onFoodInsightClick(day.id, activity)
                                 : undefined
                             }
+                            likelyVisited={likelyVisitedIds?.has(activity.id)}
                           />
                         ))}
                       </div>

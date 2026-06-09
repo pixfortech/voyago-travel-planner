@@ -144,6 +144,13 @@ export interface Activity {
   // Phase 14 extra — smart category auto-selection from Google place types.
   suggestedCategorySource?: 'google_place_type' | 'manual'
   detectedGoogleTypes?: string[]
+  // Phase 15A — Smart Visited Places Tracker (all optional; non-destructive).
+  // Stored status always wins over live detection; user can override manually.
+  visitedStatus?: VisitedStatus
+  visitedAt?: string                 // ISO — when marked visited/skipped
+  visitedConfidence?: VisitedConfidence
+  visitedSource?: VisitedSource
+  visitedLocationPointId?: string    // location/memory point that matched
 }
 
 export interface ItineraryDay {
@@ -1154,4 +1161,165 @@ export interface OptimiseRouteResult {
    */
   routePolyline?: string
   warnings: string[]
+}
+
+// ── Smart Visited Places Tracker + Gap Planner (Phase 15A) ───────────────────
+//
+// Detects which planned itinerary places have likely been visited by comparing
+// Travel History / live-tracking / memory GPS points against activity coords.
+// Detection is APPROXIMATE and never auto-confirms — the user confirms or skips.
+// Visited data is private to trip members and never written to public shares.
+
+/** Lifecycle of a planned place's visit state. */
+export type VisitedStatus =
+  | 'not_visited'
+  | 'likely_visited'      // detected from location data, awaiting user confirmation
+  | 'confirmed_visited'   // user confirmed
+  | 'skipped'             // user marked as skipped
+
+/** How confident the detection is, based on distance + GPS accuracy. */
+export type VisitedConfidence = 'high' | 'medium' | 'low'
+
+/** Where a visited signal came from. */
+export type VisitedSource =
+  | 'location_history'    // manual check-in
+  | 'live_tracking'       // foreground live tracking point
+  | 'memory'              // GPS attached to a photo memory
+  | 'current_location'    // user's one-shot current-location check
+  | 'manual'              // user set it by hand with no GPS match
+
+/** A computed (not stored) detection that an activity was likely visited. */
+export interface VisitedDetection {
+  activityId: string
+  dayId: string
+  status: 'likely_visited'   // detection only ever yields likely_visited
+  confidence: VisitedConfidence
+  source: VisitedSource
+  nearestDistanceMeters: number
+  matchedLocationPointId?: string
+  matchedAt?: string         // ISO timestamp of the closest matching point
+}
+
+/** A single planned place in the gap analysis, with its effective status. */
+export interface GapAnalysisPlace {
+  activityId: string
+  dayId: string
+  dayNumber: number
+  date: string
+  title: string
+  category?: ActivityCategory
+  lat?: number
+  lng?: number
+  status: VisitedStatus
+  confidence?: VisitedConfidence
+  /** Straight-line metres from the user's current location, when provided. */
+  distanceFromCurrentMeters?: number
+}
+
+/** Trip-level progress snapshot derived from itinerary + location data. */
+export interface GapAnalysis {
+  totalPlanned: number
+  withCoordinates: number
+  confirmedVisited: number
+  likelyVisited: number
+  skipped: number
+  notVisited: number
+  /** (confirmed + likely + skipped) / totalPlanned, 0–100. */
+  completionPercent: number
+  unplannedVisitedCount: number
+  visitedPlaces: GapAnalysisPlace[]
+  remainingPlaces: GapAnalysisPlace[]
+  skippedPlaces: GapAnalysisPlace[]
+  distanceTravelledKm: number
+  tripDaysTotal: number
+  tripDaysElapsed: number
+  tripDaysRemaining: number
+  budgetTotal: number
+  budgetSpent: number
+  budgetRemaining: number
+  /** Remaining places ordered by nearness to current location (when provided). */
+  nextBestPlaces: GapAnalysisPlace[]
+}
+
+/** Planning scopes the AI Gap Planner can target. */
+export type GapPlannerMode =
+  | 'complete_remaining'
+  | 'today_only'
+  | 'tomorrow_only'
+  | 'next_few_hours'
+  | 'fill_free_time'
+  | 'replace_missed'
+
+/** A compact place reference sent to the AI (no IDs, no secrets). */
+export interface GapPlannerPlaceRef {
+  title: string
+  category?: ActivityCategory
+  lat?: number
+  lng?: number
+  date?: string
+}
+
+/** Input sent to POST /api/ai/itinerary-gap-planner. Privacy-safe. */
+export interface GapPlannerInput {
+  tripName: string
+  destination: string
+  tripType: string
+  travellerCount: number
+  currency: string
+  startDate: string
+  endDate: string
+  today: string                 // YYYY-MM-DD
+  nowTime?: string              // HH:MM local, optional
+  mode: GapPlannerMode
+  pace: 'relaxed' | 'balanced' | 'packed'
+  allowRevisits: boolean
+  hasCurrentLocation: boolean
+  /** Only included when the user explicitly ran with current location. */
+  currentLocation?: { lat: number; lng: number }
+  startPointName?: string       // hotel / last check-in label
+  budgetRemaining?: number
+  visitedPlaces: GapPlannerPlaceRef[]
+  remainingPlaces: GapPlannerPlaceRef[]
+  constraints?: string
+}
+
+/** A single AI-proposed activity in a preview (never auto-applied). */
+export interface GapPlannerProposedActivity {
+  title: string
+  category?: ActivityCategory
+  startTime?: string
+  endTime?: string
+  estimatedCost?: number
+  locationName?: string
+  notes?: string
+  isBreak?: boolean             // food / rest break
+  fromRemaining?: boolean       // maps to an existing remaining place
+}
+
+/** A proposed day in the gap-planner preview. */
+export interface GapPlannerProposedDay {
+  date: string                  // YYYY-MM-DD
+  label: string                 // e.g. "Today", "Tomorrow"
+  activities: GapPlannerProposedActivity[]
+}
+
+/** Structured preview returned by the gap planner. */
+export interface GapPlannerResult {
+  summary: string
+  mode: GapPlannerMode
+  proposedDays: GapPlannerProposedDay[]
+  routeOrderNote: string
+  estimatedTotalCost: number
+  timingNotes: string[]
+  warnings: string[]
+  /** Always present — reminds the user the plan is approximate. */
+  approximateLabel: string
+}
+
+/** API response envelope for POST /api/ai/itinerary-gap-planner. */
+export interface GapPlannerResponse {
+  result: GapPlannerResult
+  isMock: boolean
+  provider: 'anthropic' | 'mock'
+  model: string
 }

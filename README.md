@@ -824,6 +824,93 @@ existing documents.)
 
 ---
 
+## Smart Visited Places Tracker + Gap Planner (Phase 15A)
+
+Voyago becomes a **live, adaptive trip assistant**. Instead of only planning
+before you travel, it compares your saved location data against your itinerary to
+estimate what you've already covered, then helps you plan the rest of the trip.
+
+Open it from the trip overview → **Smart Planner** (`/trips/[tripId]/smart-planner`).
+
+### Visited place detection (approximate, user-confirmed)
+
+Detection reuses data you've already saved — it never starts new tracking:
+
+- **Travel History** check-ins and **foreground live-tracking** points
+- GPS attached to **photo memories**
+- Itinerary **activity coordinates** (lat/lng from Google Places)
+
+Each planned place with coordinates is compared to those signals with a
+[haversine](https://en.wikipedia.org/wiki/Haversine_formula) distance check. If a
+signal falls within a configurable radius (**100–250 m**, default **150 m**,
+widened by GPS accuracy when available) the place is flagged **Likely visited**
+with a **high / medium / low** confidence.
+
+Detection is **approximate and never auto-confirms**. A place only becomes
+*Confirmed visited* when you tap to confirm. A stored status always wins over
+live detection, and you can override or reset any place by hand. Itinerary
+activity cards show subtle badges: **Likely visited**, **Visited**, **Skipped**.
+
+### Current-location check (user-triggered only)
+
+The **Use current location** button is the *only* thing that requests location
+permission — there is **no automatic prompt on load and no background tracking**
+(a web-app constraint we lean into). When you run it, Voyago lists the nearest
+planned places, lets you **mark a place visited** ("I'm here"), and lets you
+**save the spot as a check-in**. Clearing it forgets the location locally.
+
+### Gap analysis
+
+The planner shows, at a glance:
+
+- Itinerary **completion %** (confirmed + likely + skipped ÷ total planned)
+- Places **visited / remaining / skipped**, plus **unplanned places visited**
+- **Days remaining** in the trip and **budget remaining** (when set)
+- **Distance already travelled** (from Travel History points)
+- **Next best places** — remaining stops, ordered by nearness to your current
+  location when you've provided it, otherwise by itinerary order
+
+### AI Gap Planner (preview → edit → apply)
+
+`POST /api/ai/itinerary-gap-planner` returns a **preview only** — it never writes
+to Firestore. Choose a planning mode:
+
+- **Complete remaining** · **Today only** · **Tomorrow only** · **Next few hours**
+  · **Fill free time** · **Replace missed places**
+
+plus a pace (relaxed / balanced / packed), an optional "allow revisits" toggle
+and free-text constraints. The AI proposes timing, estimated (approximate) costs,
+a sensible travel order and food/rest breaks, avoiding places you've already
+visited unless you allow revisits. If a current location is provided it's used as
+the start point; otherwise your last check-in / hotel / itinerary order is used.
+
+You then **edit or remove** any proposed activity before applying. **Apply**:
+
+- asks for explicit confirmation first,
+- **only adds** new activities to **today and future days**,
+- **protects past/completed days** (they're skipped),
+- **never deletes or overwrites** your existing itinerary.
+
+If `ANTHROPIC_API_KEY` is missing the endpoint returns a clearly-labelled
+**Development Mock** plan so the flow always works. Google Routes is used only
+when you explicitly run a route-aware action; with no Maps key the planner falls
+back to itinerary-order suggestions.
+
+### Privacy
+
+- Visited/location data is **private to trip members** and is **never** written
+  to the public share snapshot (the share builder copies only an explicit safe
+  subset of itinerary fields — visited fields are not among them).
+- Reports include a **Itinerary Progress** section (completion %, visited count,
+  skipped, unplanned-visited, distance) but **never print precise coordinates**.
+- The AI only ever receives the place/route data needed for the chosen plan, and
+  only receives your current location when you explicitly run the planner with it.
+
+No new Firestore or Storage rules were required — the new fields are optional and
+live on existing trip-member documents.
+
+---
+
 ## Scripts
 
 | Command         | Description                          |

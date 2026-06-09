@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import {
   MapPin, Calendar, Users, Wallet, Map, Pencil, Trash2, Share2,
   Sparkles, Camera, Lock, Plus, ChevronRight, CheckCircle2, Circle,
-  TrendingUp, UserPlus, Navigation, Play, FileText, MessageSquare, CheckSquare,
+  TrendingUp, UserPlus, Navigation, Play, FileText, MessageSquare, CheckSquare, Compass,
 } from 'lucide-react'
 import { getTrip, deleteTrip, getExpenses, getMemories } from '@/lib/firestore'
 import { getRecentTripComments } from '@/lib/comments'
@@ -350,6 +350,21 @@ export default function TripOverviewPage() {
                   </div>
                   <p className="font-bold text-gray-900 text-sm">Travel History</p>
                   <p className="text-xs text-gray-400 mt-0.5">Check-ins & tracking</p>
+                </div>
+              </Link>
+
+              <Link href={`/trips/${tripId}/smart-planner`}>
+                <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm hover:shadow-md hover:border-fuchsia-200 hover:-translate-y-0.5 transition-all cursor-pointer relative overflow-hidden">
+                  <div className="absolute top-2.5 right-2.5">
+                    <span className="inline-flex items-center gap-1 bg-fuchsia-100 text-fuchsia-600 text-[10px] font-black px-2 py-0.5 rounded-full">
+                      Beta
+                    </span>
+                  </div>
+                  <div className="w-10 h-10 bg-gradient-to-br from-fuchsia-500 to-violet-600 rounded-xl flex items-center justify-center mb-3 shadow-sm shadow-fuchsia-500/20">
+                    <Compass size={20} className="text-white" />
+                  </div>
+                  <p className="font-bold text-gray-900 text-sm">Smart Planner</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Visited &amp; gap planning</p>
                 </div>
               </Link>
 

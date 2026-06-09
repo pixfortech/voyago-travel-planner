@@ -3,7 +3,14 @@
 import { Trash2, CheckCircle, Circle, Pencil, Star, MessageSquare, UtensilsCrossed } from 'lucide-react'
 import { activityTypeIcon, activityCategoryIcon, formatCurrency } from '@/lib/utils'
 import { priceLevelSymbol, formatRating } from '@/lib/maps/config'
-import type { Activity, BookingStatus } from '@/types'
+import type { Activity, BookingStatus, VisitedStatus } from '@/types'
+
+/** Small visited-status pill config (Phase 15A). */
+const VISITED_BADGE: Record<Exclude<VisitedStatus, 'not_visited'>, { label: string; cls: string }> = {
+  likely_visited: { label: 'Likely visited', cls: 'bg-sky-50 text-sky-600' },
+  confirmed_visited: { label: 'Visited', cls: 'bg-emerald-50 text-emerald-600' },
+  skipped: { label: 'Skipped', cls: 'bg-amber-50 text-amber-600' },
+}
 
 const STATUS_CONFIG: Record<BookingStatus, { label: string; cls: string }> = {
   planned: { label: 'Planned', cls: 'bg-gray-100 text-gray-500' },
@@ -22,6 +29,8 @@ interface ActivityCardProps {
   onToggleConfirm: (confirmed: boolean) => void
   onCommentsClick?: () => void
   onFoodInsightClick?: () => void
+  /** Live detection (not stored) that this place was likely visited. */
+  likelyVisited?: boolean
 }
 
 export default function ActivityCard({
@@ -33,7 +42,12 @@ export default function ActivityCard({
   onToggleConfirm,
   onCommentsClick,
   onFoodInsightClick,
+  likelyVisited = false,
 }: ActivityCardProps) {
+  // Stored status wins; otherwise a live detection shows "Likely visited".
+  const visitedStatus: VisitedStatus =
+    activity.visitedStatus ?? (likelyVisited ? 'likely_visited' : 'not_visited')
+  const visitedBadge = visitedStatus !== 'not_visited' ? VISITED_BADGE[visitedStatus] : null
   const isCompleted =
     activity.bookingStatus === 'completed' || (!activity.bookingStatus && activity.confirmed)
 
@@ -100,6 +114,11 @@ export default function ActivityCard({
             {activity.suggestedCategorySource === 'google_place_type' && (
               <span className="text-[9px] font-semibold text-primary-500 bg-primary-50 px-1.5 py-0.5 rounded-full">
                 Auto
+              </span>
+            )}
+            {visitedBadge && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${visitedBadge.cls}`}>
+                {visitedBadge.label}
               </span>
             )}
           </div>

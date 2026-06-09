@@ -19,6 +19,7 @@ import {
 } from '@/lib/calculations'
 import { computeTripDistance } from '@/lib/location/distance'
 import { buildPlaybackPoints } from '@/lib/location/playback'
+import { computeGapAnalysis } from '@/lib/location/gapAnalysis'
 import { downloadExpensesCSV, downloadSettlementCSV } from '@/lib/export'
 import { formatDate, formatCurrency, getDayCount, tripTypeLabel } from '@/lib/utils'
 import ItineraryRatingCard from '@/components/trips/ItineraryRatingCard'
@@ -571,6 +572,54 @@ function RouteSection({
   )
 }
 
+// ── Visited Progress Section (Phase 15A) ─────────────────────────────────────
+//
+// Shows itinerary completion derived from saved location data. Detection is
+// approximate and user-confirmed. Precise coordinates are NOT printed here, and
+// this section is never part of the public share snapshot.
+
+function VisitedProgressSection({
+  trip, days, expenses, locationPoints, memories,
+}: {
+  trip: Trip
+  days: ItineraryDay[]
+  expenses: Expense[]
+  locationPoints: TripLocationPoint[]
+  memories: TripMemory[]
+}) {
+  const { analysis } = computeGapAnalysis(trip, days, locationPoints, memories, {
+    now: new Date(),
+    budgetTotal: trip.budget,
+    budgetSpent: getTotalSpent(expenses),
+  })
+
+  if (analysis.totalPlanned === 0) return null
+
+  return (
+    <Section title="Itinerary Progress">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <StatPill label="Completion" value={`${analysis.completionPercent}%`} />
+        <StatPill label="Visited" value={String(analysis.confirmedVisited + analysis.likelyVisited)} />
+        <StatPill label="Skipped" value={String(analysis.skipped)} />
+        <StatPill label="Remaining" value={String(analysis.notVisited)} />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatPill label="Confirmed" value={String(analysis.confirmedVisited)} />
+        <StatPill label="Likely visited" value={String(analysis.likelyVisited)} />
+        <StatPill label="Unplanned visited" value={String(analysis.unplannedVisitedCount)} />
+        <StatPill
+          label="Distance travelled"
+          value={analysis.distanceTravelledKm > 0 ? `${analysis.distanceTravelledKm} km` : '—'}
+        />
+      </div>
+      <p className="text-[11px] text-gray-400 mt-3 italic">
+        Visited detection is approximate — based on saved check-ins, foreground tracking and photo
+        locations, and confirmed by the traveller. Precise coordinates are not shown.
+      </p>
+    </Section>
+  )
+}
+
 // ── Memories Section ──────────────────────────────────────────────────────────
 
 function MemoriesSection({ memories, days }: { memories: TripMemory[]; days: ItineraryDay[] }) {
@@ -889,6 +938,13 @@ export default function ReportViewPage() {
                 totalDistanceKm={totalDistanceKm}
               />
               <ItinerarySection days={days} />
+              <VisitedProgressSection
+                trip={trip}
+                days={days}
+                expenses={expenses}
+                locationPoints={locationPoints}
+                memories={memories}
+              />
               {days.length > 0 && (
                 <Section title="AI Itinerary Rating">
                   <ItineraryRatingCard input={ratingInput} printable={false} />
@@ -928,6 +984,13 @@ export default function ReportViewPage() {
                 totalDistanceKm={totalDistanceKm}
               />
               <ItinerarySection days={days} />
+              <VisitedProgressSection
+                trip={trip}
+                days={days}
+                expenses={expenses}
+                locationPoints={locationPoints}
+                memories={memories}
+              />
               {days.length > 0 && (
                 <Section title="AI Itinerary Rating">
                   <ItineraryRatingCard input={ratingInput} printable={false} />

@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { TrendingUp, TrendingDown, X } from 'lucide-react'
-import { getTrip, getItineraryDays, getExpenses, addActivity, deleteActivity, updateActivity } from '@/lib/firestore'
+import { getTrip, getItineraryDays, getExpenses, getLocationPoints, getMemories, addActivity, deleteActivity, updateActivity } from '@/lib/firestore'
+import { detectVisitedActivities } from '@/lib/location/visited'
 import { formatCurrency } from '@/lib/utils'
 import { useApp } from '@/context/AppContext'
 import AppShell from '@/components/layout/AppShell'
@@ -18,6 +19,7 @@ import FoodInsightCard from '@/components/itinerary/FoodInsightCard'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import type {
   Trip, ItineraryDay, Activity, Expense, BudgetCoachRouteSummary, FoodPlaceInsight,
+  TripLocationPoint, TripMemory,
 } from '@/types'
 
 export default function ItineraryPage() {
@@ -34,6 +36,9 @@ export default function ItineraryPage() {
   const [routeSummary, setRouteSummary] = useState<BudgetCoachRouteSummary | undefined>(undefined)
   const [commentTarget, setCommentTarget] = useState<{ activityId: string; activityTitle: string } | null>(null)
   const [foodTarget, setFoodTarget] = useState<{ dayId: string; activity: Activity } | null>(null)
+  // Phase 15A — location signals for likely-visited badges (read-only, no GPS prompt).
+  const [locationPoints, setLocationPoints] = useState<TripLocationPoint[]>([])
+  const [memories, setMemories] = useState<TripMemory[]>([])
 
   const { status: mapsStatus } = useMapsStatus()
 
@@ -48,7 +53,20 @@ export default function ItineraryPage() {
         setLoading(false)
       }
     )
+    // Best-effort: load saved location/memory data for visited badges. Never
+    // requests GPS permission — only reads what the user already saved.
+    Promise.all([getLocationPoints(tripId), getMemories(tripId)])
+      .then(([lp, m]) => { setLocationPoints(lp); setMemories(m) })
+      .catch(() => {})
   }, [tripId, router])
+
+  // Activity IDs detected as likely visited (display-only; stored status wins).
+  const likelyVisitedIds = useMemo(() => {
+    if (locationPoints.length === 0 && memories.length === 0) return new Set<string>()
+    return new Set(
+      detectVisitedActivities(days, locationPoints, memories).map((d) => d.activityId),
+    )
+  }, [days, locationPoints, memories])
 
   function handleAddActivityClick(dayId: string) {
     setAddingDayId(dayId)
@@ -239,6 +257,7 @@ export default function ItineraryPage() {
                 setCommentTarget({ activityId, activityTitle })
               }
               onFoodInsightClick={(dayId, activity) => setFoodTarget({ dayId, activity })}
+              likelyVisitedIds={likelyVisitedIds}
             />
           ))
         )}
