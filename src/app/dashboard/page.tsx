@@ -86,9 +86,14 @@ export default function DashboardPage() {
           title="No trips yet"
           description="Create your first trip and start building your perfect itinerary."
           action={
-            <Button onClick={() => router.push('/trips/new')} size="lg">
-              <Plus size={18} /> Plan Your First Trip
-            </Button>
+            <div className="flex flex-col gap-2 w-full max-w-xs">
+              <Button onClick={() => router.push('/trips/new/ai-generator')} size="lg" className="w-full">
+                <Sparkles size={18} /> Create with AI
+              </Button>
+              <Button variant="secondary" onClick={() => router.push('/trips/new')} size="lg" className="w-full">
+                <Plus size={18} /> Create manually
+              </Button>
+            </div>
           }
         />
       ) : (
@@ -109,20 +114,35 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {/* AI Trip Generator banner */}
-          <button
-            onClick={() => router.push(`/trips/${trips[0]!.id}/ai-generator`)}
-            className="w-full text-left mb-6 rounded-2xl border border-violet-100 bg-gradient-to-r from-violet-50 to-fuchsia-50 p-4 flex items-center gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all"
-          >
-            <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm shadow-violet-500/20">
-              <Sparkles size={20} className="text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-gray-900 text-sm">AI Trip Generator</p>
-              <p className="text-xs text-gray-500">Auto-fill a full day-by-day itinerary inside any trip — preview &amp; edit before saving.</p>
-            </div>
-            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 flex-shrink-0">New</span>
-          </button>
+          {/* AI options row */}
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <button
+              onClick={() => router.push('/trips/new/ai-generator')}
+              className="text-left rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-3.5 flex flex-col gap-2 hover:shadow-md hover:-translate-y-0.5 transition-all"
+            >
+              <div className="w-9 h-9 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-xl flex items-center justify-center shadow-sm shadow-violet-500/20">
+                <Sparkles size={18} className="text-white" />
+              </div>
+              <div>
+                <p className="font-bold text-gray-900 text-xs leading-tight">Create Trip with AI</p>
+                <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">Prompt, form or guided questions</p>
+              </div>
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 self-start">New</span>
+            </button>
+            <button
+              onClick={() => router.push(`/trips/${trips[0]!.id}/ai-generator`)}
+              className="text-left rounded-2xl border border-fuchsia-100 bg-gradient-to-br from-fuchsia-50 to-pink-50 p-3.5 flex flex-col gap-2 hover:shadow-md hover:-translate-y-0.5 transition-all"
+            >
+              <div className="w-9 h-9 bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-xl flex items-center justify-center shadow-sm shadow-fuchsia-500/20">
+                <Sparkles size={18} className="text-white" />
+              </div>
+              <div>
+                <p className="font-bold text-gray-900 text-xs leading-tight">Auto-fill Existing Trip</p>
+                <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">Day-by-day itinerary for any trip</p>
+              </div>
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-600 self-start">AI</span>
+            </button>
+          </div>
 
           {/* Trip cards grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

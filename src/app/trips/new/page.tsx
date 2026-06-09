@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, Plus, X } from 'lucide-react'
+import { Check, Plus, X, Sparkles, ChevronRight } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import { createTrip } from '@/lib/firestore'
 import AppShell from '@/components/layout/AppShell'
@@ -203,6 +203,20 @@ export default function NewTripPage() {
             exit={{ opacity: 0, x: -20 }}
             className="space-y-5"
           >
+            <button
+              onClick={() => router.push('/trips/new/ai-generator')}
+              className="w-full text-left rounded-2xl border border-violet-100 bg-violet-50/60 p-3 flex items-center gap-3 hover:bg-violet-50 transition-all"
+            >
+              <div className="w-8 h-8 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Sparkles size={15} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-gray-800">Create with AI instead</p>
+                <p className="text-[11px] text-gray-500 mt-0.5">Let AI generate a full itinerary from a prompt or guided questions</p>
+              </div>
+              <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />
+            </button>
+
             <div>
               <h2 className="text-xl font-black text-gray-900 mb-1">Trip basics</h2>
               <p className="text-sm text-gray-500">Tell us about your trip.</p>

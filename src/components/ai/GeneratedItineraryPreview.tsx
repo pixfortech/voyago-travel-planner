@@ -47,6 +47,8 @@ interface PreviewProps {
   applying: boolean
   applyNote: string | null
   mapsAvailable: boolean
+  applyLabel?: string
+  applyingLabel?: string
   onApply: (days: EditableGeneratedDay[]) => void
   onDiscard: () => void
   onRegenerate: () => void
@@ -76,6 +78,7 @@ function fmtDuration(seconds: number): string {
 
 export default function GeneratedItineraryPreview({
   result, currency, travellerCount, isMock, applying, applyNote, mapsAvailable,
+  applyLabel = 'Apply to trip', applyingLabel = 'Applying…',
   onApply, onDiscard, onRegenerate,
 }: PreviewProps) {
   const [editDays, setEditDays] = useState<EditableGeneratedDay[]>([])
@@ -461,7 +464,7 @@ export default function GeneratedItineraryPreview({
       <div className="flex flex-wrap gap-2 mt-4">
         <Button onClick={handleApplyClick} disabled={applying} className="flex-1 min-w-[140px]">
           {applying ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-          {applying ? 'Applying…' : 'Apply to trip'}
+          {applying ? applyingLabel : applyLabel}
         </Button>
         <Button variant="secondary" onClick={onRegenerate} disabled={applying}>
           <Sparkles size={14} /> Regenerate
