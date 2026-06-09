@@ -15,6 +15,7 @@ import { db } from '@/lib/firebase'
 import {
   getTotalSpent, getRemainingBudget, getCategoryTotals, getVendorTypeTotals,
   getDayWiseTotals, getTravellerBalances, getSettlementSummary, getPerHeadActualCost,
+  getFoodSpendStats,
 } from '@/lib/calculations'
 import { computeTripDistance } from '@/lib/location/distance'
 import { buildPlaybackPoints } from '@/lib/location/playback'
@@ -82,6 +83,7 @@ function TripHeader({
     : null
   const completedTasks = tasks.filter((t) => t.status === 'done').length
   const activityCount = days.reduce((n, d) => n + d.activities.length, 0)
+  const foodStats = getFoodSpendStats(expenses, trip.travellers?.length ?? 1)
 
   return (
     <Section title="Trip Overview">
@@ -122,6 +124,12 @@ function TripHeader({
         )}
         {totalDistanceKm > 0 && (
           <StatPill label="Distance" value={`${totalDistanceKm} km`} />
+        )}
+        {foodStats.foodTotal > 0 && (
+          <StatPill label="Food Spend" value={formatCurrency(foodStats.foodTotal, trip.currency)} />
+        )}
+        {foodStats.billAttachmentCount > 0 && (
+          <StatPill label="Bills Attached" value={String(foodStats.billAttachmentCount)} />
         )}
       </div>
       {trip.notes && (
@@ -342,6 +350,68 @@ function BudgetSection({
               ))}
             </tbody>
           </table>
+        </Section>
+      )}
+    </>
+  )
+}
+
+// ── Food Spend & Bills Section (Phase 14) ─────────────────────────────────────
+
+function FoodSpendSection({ trip, expenses }: { trip: Trip; expenses: Expense[] }) {
+  const stats = getFoodSpendStats(expenses, trip.travellers?.length ?? 1)
+  if (stats.foodExpenseCount === 0) return null
+
+  return (
+    <>
+      <Section title="Food &amp; Café Spend">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatPill label="Total Food Spend" value={formatCurrency(stats.foodTotal, trip.currency)} />
+          <StatPill label="Food / Person" value={formatCurrency(stats.foodPerPerson, trip.currency)} />
+          <StatPill label="Avg / Meal" value={formatCurrency(stats.averageFoodPerMeal, trip.currency)} />
+          <StatPill label="Highest Bill" value={formatCurrency(stats.highestFoodBill, trip.currency)} />
+          <StatPill label="Food Expenses" value={String(stats.foodExpenseCount)} />
+          {stats.billAttachmentCount > 0 && (
+            <StatPill label="Bills Attached" value={String(stats.billAttachmentCount)} />
+          )}
+        </div>
+      </Section>
+
+      {stats.vendorWise.length > 0 && (
+        <Section title="Food Spend by Vendor">
+          <div className="space-y-2">
+            {stats.vendorWise.map((v) => {
+              const pct = stats.foodTotal > 0 ? Math.round((v.total / stats.foodTotal) * 100) : 0
+              return (
+                <div key={v.name} className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-gray-700 capitalize w-32 flex-shrink-0 truncate">{v.name}</span>
+                  <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-orange-400 rounded-full" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-sm font-bold text-gray-700 w-24 text-right">{formatCurrency(v.total, trip.currency)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </Section>
+      )}
+
+      {stats.locationWise.length > 0 && (
+        <Section title="Food Spend by Location">
+          <div className="space-y-2">
+            {stats.locationWise.map((l) => {
+              const pct = stats.foodTotal > 0 ? Math.round((l.total / stats.foodTotal) * 100) : 0
+              return (
+                <div key={l.name} className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-gray-700 w-32 flex-shrink-0 truncate">{l.name}</span>
+                  <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-rose-400 rounded-full" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-sm font-bold text-gray-700 w-24 text-right">{formatCurrency(l.total, trip.currency)}</span>
+                </div>
+              )
+            })}
+          </div>
         </Section>
       )}
     </>
@@ -596,13 +666,13 @@ function RestaurantIntelligencePlaceholder() {
           <UtensilsCrossed size={20} className="text-orange-500" />
         </div>
         <div className="flex items-center justify-center gap-2 mb-1">
-          <p className="text-sm font-bold text-gray-700">Restaurant &amp; Café Recommendations</p>
+          <p className="text-sm font-bold text-gray-700">Restaurant &amp; Café Intelligence</p>
           <span className="text-[10px] font-black text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full uppercase tracking-wide">
-            Coming Soon
+            Beta
           </span>
         </div>
         <p className="text-xs text-gray-400 max-w-xs mx-auto leading-relaxed">
-          AI-curated restaurant picks near your itinerary stops, based on your preferences, budget, and trip type. Powered by Places API.
+          Open any food activity in your Itinerary and tap the fork icon to run AI Food Intelligence — vibe, budget fit and an approximate per-person cost range. Curated nearby picks are coming next.
         </p>
       </div>
     </Section>
@@ -621,13 +691,13 @@ function BillUploadPlaceholder() {
           <Image size={20} className="text-blue-500" />
         </div>
         <div className="flex items-center justify-center gap-2 mb-1">
-          <p className="text-sm font-bold text-gray-700">Bill Image Upload</p>
-          <span className="text-[10px] font-black text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full uppercase tracking-wide">
-            Coming Soon
+          <p className="text-sm font-bold text-gray-700">Bill Upload &amp; Spend Analysis</p>
+          <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full uppercase tracking-wide">
+            Live
           </span>
         </div>
         <p className="text-xs text-gray-400 max-w-xs mx-auto leading-relaxed">
-          Upload photos of receipts and bills. Manual entry is always available; automatic extraction will be added in a future phase.
+          Open an expense in the Budget tab and tap &ldquo;Attach Bill&rdquo; to upload a receipt and get an AI spend draft from your entered details. Automatic image reading (OCR) is coming soon — manual entry stays primary.
         </p>
         <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-gray-400">
           <Lock size={11} />
@@ -832,6 +902,7 @@ export default function ReportViewPage() {
                   perHeadSpend={perHeadSpend}
                 />
               )}
+              {expenses.length > 0 && <FoodSpendSection trip={trip} expenses={expenses} />}
               {expenses.length > 0 && (trip.travellers?.length ?? 0) > 1 && (
                 <SettlementSection
                   trip={trip}
@@ -867,12 +938,15 @@ export default function ReportViewPage() {
 
           {/* Budget Report */}
           {type === 'budget' && (
-            <BudgetSection
-              trip={trip}
-              expenses={expenses}
-              onCSV={() => downloadExpensesCSV(expenses, trip)}
-              perHeadSpend={perHeadSpend}
-            />
+            <>
+              <BudgetSection
+                trip={trip}
+                expenses={expenses}
+                onCSV={() => downloadExpensesCSV(expenses, trip)}
+                perHeadSpend={perHeadSpend}
+              />
+              <FoodSpendSection trip={trip} expenses={expenses} />
+            </>
           )}
 
           {/* Settlement Report */}

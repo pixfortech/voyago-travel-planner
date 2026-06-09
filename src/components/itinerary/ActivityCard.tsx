@@ -1,6 +1,6 @@
 'use client'
 
-import { Trash2, CheckCircle, Circle, Pencil, Star, MessageSquare } from 'lucide-react'
+import { Trash2, CheckCircle, Circle, Pencil, Star, MessageSquare, UtensilsCrossed } from 'lucide-react'
 import { activityTypeIcon, activityCategoryIcon, formatCurrency } from '@/lib/utils'
 import { priceLevelSymbol, formatRating } from '@/lib/maps/config'
 import type { Activity, BookingStatus } from '@/types'
@@ -21,6 +21,7 @@ interface ActivityCardProps {
   onDelete: () => void
   onToggleConfirm: (confirmed: boolean) => void
   onCommentsClick?: () => void
+  onFoodInsightClick?: () => void
 }
 
 export default function ActivityCard({
@@ -31,6 +32,7 @@ export default function ActivityCard({
   onDelete,
   onToggleConfirm,
   onCommentsClick,
+  onFoodInsightClick,
 }: ActivityCardProps) {
   const isCompleted =
     activity.bookingStatus === 'completed' || (!activity.bookingStatus && activity.confirmed)
@@ -38,6 +40,8 @@ export default function ActivityCard({
   const icon = activity.category
     ? activityCategoryIcon(activity.category)
     : activityTypeIcon(activity.type)
+
+  const isFood = activity.type === 'food' || activity.category === 'food'
 
   const estimatedCost = activity.estimatedCost ?? activity.cost ?? 0
 
@@ -133,6 +137,20 @@ export default function ActivityCard({
 
         {/* Actions */}
         <div className="flex items-center gap-1 flex-shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+          {isFood && onFoodInsightClick && (
+            <button
+              onClick={onFoodInsightClick}
+              className={`p-1.5 rounded-lg transition-all ${
+                activity.foodInsight
+                  ? 'text-orange-500 hover:bg-orange-50'
+                  : 'text-gray-300 hover:text-orange-500 hover:bg-orange-50'
+              }`}
+              aria-label="Food intelligence"
+              title={activity.foodInsight ? 'Food Intelligence (saved)' : 'Food Intelligence'}
+            >
+              <UtensilsCrossed size={13} />
+            </button>
+          )}
           {onCommentsClick && (
             <button
               onClick={onCommentsClick}

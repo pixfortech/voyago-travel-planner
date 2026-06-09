@@ -14,9 +14,10 @@ import BudgetCoachCard from '@/components/ai/BudgetCoachCard'
 import RoutePlanningSection from '@/components/maps/RoutePlanningSection'
 import CommentsPanel from '@/components/comments/CommentsPanel'
 import ReactionBar from '@/components/comments/ReactionBar'
+import FoodInsightCard from '@/components/itinerary/FoodInsightCard'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import type {
-  Trip, ItineraryDay, Activity, Expense, BudgetCoachRouteSummary,
+  Trip, ItineraryDay, Activity, Expense, BudgetCoachRouteSummary, FoodPlaceInsight,
 } from '@/types'
 
 export default function ItineraryPage() {
@@ -32,6 +33,7 @@ export default function ItineraryPage() {
   const [editingActivity, setEditingActivity] = useState<{ dayId: string; activity: Activity } | null>(null)
   const [routeSummary, setRouteSummary] = useState<BudgetCoachRouteSummary | undefined>(undefined)
   const [commentTarget, setCommentTarget] = useState<{ activityId: string; activityTitle: string } | null>(null)
+  const [foodTarget, setFoodTarget] = useState<{ dayId: string; activity: Activity } | null>(null)
 
   const { status: mapsStatus } = useMapsStatus()
 
@@ -119,6 +121,28 @@ export default function ItineraryPage() {
             }
           : d
       )
+    )
+  }
+
+  async function handleSaveFoodInsight(dayId: string, activityId: string, insight: FoodPlaceInsight) {
+    await updateActivity(tripId, dayId, activityId, { foodInsight: insight })
+    setDays((prev) =>
+      prev.map((d) =>
+        d.id === dayId
+          ? {
+              ...d,
+              activities: d.activities.map((a) =>
+                a.id === activityId ? { ...a, foodInsight: insight } : a
+              ),
+            }
+          : d
+      )
+    )
+    // Keep the drawer's activity in sync so the saved badge reflects immediately.
+    setFoodTarget((prev) =>
+      prev && prev.activity.id === activityId
+        ? { ...prev, activity: { ...prev.activity, foodInsight: insight } }
+        : prev
     )
   }
 
@@ -214,6 +238,7 @@ export default function ItineraryPage() {
               onCommentsClick={(activityId, activityTitle) =>
                 setCommentTarget({ activityId, activityTitle })
               }
+              onFoodInsightClick={(dayId, activity) => setFoodTarget({ dayId, activity })}
             />
           ))
         )}
@@ -307,6 +332,51 @@ export default function ItineraryPage() {
                   trip={trip}
                   currentUid={user.uid}
                   authorName={profile?.name ?? user.displayName ?? 'Member'}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Food Intelligence drawer ── */}
+      <AnimatePresence>
+        {foodTarget && trip && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex justify-end"
+            onClick={() => setFoodTarget(null)}
+          >
+            <div className="flex-1 bg-black/40" />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              className="w-full max-w-sm bg-white flex flex-col h-full shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-wide">Restaurant / Café</p>
+                  <p className="text-sm font-bold text-gray-900 truncate">{foodTarget.activity.title}</p>
+                </div>
+                <button
+                  onClick={() => setFoodTarget(null)}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors flex-shrink-0"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <FoodInsightCard
+                  trip={trip}
+                  activity={foodTarget.activity}
+                  onSave={(insight) =>
+                    handleSaveFoodInsight(foodTarget.dayId, foodTarget.activity.id, insight)
+                  }
                 />
               </div>
             </motion.div>

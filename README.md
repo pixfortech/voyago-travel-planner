@@ -752,6 +752,78 @@ rule already covers the `tasks` and `polls` subcollections.)
 
 ---
 
+## Restaurant / Café Intelligence (Phase 14)
+
+Food activities in the **Itinerary** carry an optional **Food Intelligence**
+card (tap the fork icon on any food/restaurant activity). It runs only when you
+ask — analysis is never automatic.
+
+- Input is privacy-safe place **metadata** (name, address, rating, rating count,
+  price level, type) plus trip/budget context. Reviews and menus are **never
+  scraped**; the review summary is explicitly based on rating metadata, not
+  review text.
+- Returns a premium decision card: vibe summary, budget fit, an **approximate**
+  per-person cost range, suitable group type, ordering strategy, spend-control
+  advice, generic dish ideas, and caveats — all clearly labelled **Approximate**
+  with a confidence badge.
+- Recommended dishes stay **generic** unless you supply a real menu/dish list.
+- You can **save** an insight onto the activity; it is stored as
+  `activity.foodInsight` and never exposed on public share pages.
+- Endpoint: `POST /api/ai/food-place-insight`. Uses the shared Anthropic
+  provider; when `ANTHROPIC_API_KEY` is missing it falls back to a clearly
+  labelled **development mock**.
+
+## Bill Upload & Spend Analysis (Phase 14)
+
+From the **Budget** tab, expand any expense and tap **Attach Bill**:
+
+1. **Upload** a receipt image/PDF (JPEG/PNG/WebP/PDF, max 10 MB) to Firebase
+   Storage under `trips/{tripId}/bills/{expenseId}/{file}` — **private to trip
+   members**, governed by the existing storage rules.
+2. **Enter bill details** manually (vendor, date, total, tax, service charge,
+   line items, notes). **Automatic image reading (OCR/vision) is Coming Soon**;
+   manual entry is the primary, always-available path.
+3. **Analyse** — `POST /api/ai/bill-analysis` returns a structured **AI Draft**
+   (detected vendor/date/total/tax/items, suggested category and vendor type,
+   per-person split, confidence, warnings). Mock fallback when no API key.
+4. **Review & confirm** — detected values are shown **side-by-side** with
+   editable confirmed values. The expense **amount is never overwritten
+   silently**: the confirmed amount defaults to the existing amount, with an
+   explicit "use detected total" shortcut. Nothing is saved until you press
+   **Confirm & Save**, after which settlement recalculates from the confirmed
+   figures.
+
+**AI limitations** — all AI output is an **approximate draft**. The bill
+endpoint analyses only the fields you typed (it does not read the image), and is
+instructed to ignore/redact any card numbers, phone numbers, or sensitive
+payment data. No expense is ever created or updated without your confirmation,
+and no payment systems are connected.
+
+**Privacy** — bill images and extracted fields are private to trip members,
+stored on the expense document (`billImageUrl`, `billStoragePath`,
+`billExtracted*`, `billConfidence`, …) and on Storage. They are **never**
+included in public share snapshots, and deleting an expense best-effort removes
+its attached bill image from Storage.
+
+**Reports** — the Budget Report and Full Trip Recap now include a **Food & Café
+Spend** section: total food spend, food per person, average per meal, highest
+bill, food-expense count, bills-attached count, plus food spend broken down by
+vendor and by location. CSV export adds bill-attached / bill-vendor / bill-total
+/ bill-confidence columns.
+
+**Environment keys**
+
+| Key                 | Purpose                                                        |
+| ------------------- | ------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | Real AI for Food Intelligence & Bill Analysis (mock if unset) |
+| `GOOGLE_MAPS_API_KEY` (server) | Place metadata used by Food Intelligence (manual entry works without it) |
+
+(No new Firestore or Storage rules were required for Phase 14 — the existing
+trip-member wildcards already cover bill subpaths and the new optional fields on
+existing documents.)
+
+---
+
 ## Scripts
 
 | Command         | Description                          |

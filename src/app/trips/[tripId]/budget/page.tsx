@@ -18,9 +18,11 @@ import BudgetOverview from '@/components/budget/BudgetOverview'
 import TravellerLedger from '@/components/budget/TravellerLedger'
 import ExpenseCard from '@/components/budget/ExpenseCard'
 import AddExpenseModal from '@/components/budget/AddExpenseModal'
+import BillUploadModal from '@/components/budget/BillUploadModal'
 import BudgetCoachCard from '@/components/ai/BudgetCoachCard'
 import CommentsPanel from '@/components/comments/CommentsPanel'
 import Button from '@/components/ui/Button'
+import { deleteBillImage } from '@/lib/bills/storage'
 import type { Trip, Expense, ItineraryDay } from '@/types'
 
 export default function BudgetPage() {
@@ -33,6 +35,7 @@ export default function BudgetPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [commentTarget, setCommentTarget] = useState<{ expenseId: string; expenseTitle: string } | null>(null)
+  const [billTarget, setBillTarget] = useState<Expense | null>(null)
 
   useEffect(() => {
     if (!tripId) return
@@ -56,8 +59,19 @@ export default function BudgetPage() {
   }
 
   async function handleDelete(expenseId: string) {
+    // Best-effort clean-up of any attached bill image before deleting the expense.
+    const target = expenses.find((e) => e.id === expenseId)
+    if (target?.billStoragePath) {
+      await deleteBillImage(target.billStoragePath)
+    }
     await deleteExpense(tripId, expenseId)
     setExpenses((prev) => prev.filter((e) => e.id !== expenseId))
+  }
+
+  // Persist confirmed bill + expense field changes from the BillUploadModal.
+  async function handleConfirmBill(expenseId: string, updates: Partial<Expense>) {
+    await updateExpense(tripId, expenseId, updates)
+    setExpenses((prev) => prev.map((e) => (e.id === expenseId ? { ...e, ...updates } : e)))
   }
 
   // Toggle one participant's "received" status — optimistic update + persist.
@@ -155,6 +169,9 @@ export default function BudgetPage() {
                     ? (id, title) => setCommentTarget({ expenseId: id, expenseTitle: title })
                     : undefined
                 }
+                onBillClick={
+                  user && !user.isAnonymous ? (exp) => setBillTarget(exp) : undefined
+                }
               />
             ))}
           </div>
@@ -192,6 +209,17 @@ export default function BudgetPage() {
         onClose={() => setModalOpen(false)}
         onAdd={handleAddExpense}
       />
+
+      {/* ── Bill upload + spend analysis ── */}
+      {billTarget && (
+        <BillUploadModal
+          open={!!billTarget}
+          trip={trip}
+          expense={billTarget}
+          onClose={() => setBillTarget(null)}
+          onConfirm={(updates) => handleConfirmBill(billTarget.id, updates)}
+        />
+      )}
 
       {/* ── Expense discussion drawer ── */}
       <AnimatePresence>

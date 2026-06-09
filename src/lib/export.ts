@@ -32,10 +32,14 @@ function downloadBlob(blob: Blob, filename: string) {
 
 export function downloadExpensesCSV(expenses: Expense[], trip: Trip) {
   const lines: string[] = [
-    row('Date', 'Title', 'Category', 'Amount', 'Currency', 'Paid By', 'Vendor', 'Vendor Type', 'Location', 'Notes'),
+    row(
+      'Date', 'Title', 'Category', 'Amount', 'Currency', 'Paid By', 'Vendor', 'Vendor Type',
+      'Location', 'Notes', 'Bill Attached', 'Bill Vendor', 'Bill Total', 'Bill Confidence',
+    ),
   ]
   const sorted = [...expenses].sort((a, b) => a.date.localeCompare(b.date))
   for (const e of sorted) {
+    const hasBill = !!e.billImageUrl || e.billAnalysisStatus === 'confirmed'
     lines.push(row(
       e.date,
       e.title,
@@ -47,6 +51,10 @@ export function downloadExpensesCSV(expenses: Expense[], trip: Trip) {
       e.vendorType ?? '',
       e.locationName ?? '',
       e.notes,
+      hasBill ? 'Yes' : 'No',
+      e.billExtractedVendor ?? '',
+      e.billExtractedTotal ?? '',
+      e.billConfidence ?? '',
     ))
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })

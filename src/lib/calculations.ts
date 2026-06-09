@@ -144,6 +144,70 @@ export function getVendorTypeTotals(expenses: Expense[]): VendorTypeTotal[] {
     .sort((a, b) => b.total - a.total)
 }
 
+// ── Food spend & bill stats (Phase 14) ────────────────────────────────────────
+
+/** An expense counts as "food" if its category is food OR its vendor type is restaurant. */
+export function isFoodExpense(e: Expense): boolean {
+  return e.category === 'food' || e.vendorType === 'restaurant'
+}
+
+export interface NamedTotal {
+  name: string
+  total: number
+}
+
+export interface FoodSpendStats {
+  foodTotal: number
+  foodExpenseCount: number
+  foodPerPerson: number
+  averageFoodPerMeal: number
+  highestFoodBill: number
+  billAttachmentCount: number
+  locationWise: NamedTotal[]
+  vendorWise: NamedTotal[]
+}
+
+export function getFoodSpendStats(
+  expenses: Expense[],
+  travellerCount: number,
+): FoodSpendStats {
+  const n = Math.max(travellerCount, 1)
+  const food = expenses.filter(isFoodExpense)
+  const foodPaise = food.reduce((s, e) => s + toPaise(e.amount), 0)
+  const foodTotal = toRupees(foodPaise)
+  const highestFoodBill = food.reduce((m, e) => Math.max(m, e.amount), 0)
+
+  const billAttachmentCount = expenses.filter(
+    (e) => !!e.billImageUrl || e.billAnalysisStatus === 'confirmed',
+  ).length
+
+  const locMap = new Map<string, number>()
+  const venMap = new Map<string, number>()
+  for (const e of food) {
+    if (e.locationName) {
+      locMap.set(e.locationName, (locMap.get(e.locationName) ?? 0) + toPaise(e.amount))
+    }
+    const vendorKey = e.vendorName || (e.vendorType ? e.vendorType : 'Other')
+    venMap.set(vendorKey, (venMap.get(vendorKey) ?? 0) + toPaise(e.amount))
+  }
+
+  const toNamedTotals = (m: Map<string, number>): NamedTotal[] =>
+    Array.from(m.entries())
+      .map(([name, paise]) => ({ name, total: toRupees(paise) }))
+      .sort((a, b) => b.total - a.total)
+
+  return {
+    foodTotal,
+    foodExpenseCount: food.length,
+    foodPerPerson: toRupees(Math.round(foodPaise / n)),
+    averageFoodPerMeal: food.length > 0 ? toRupees(Math.round(foodPaise / food.length)) : 0,
+    highestFoodBill,
+    billAttachmentCount,
+    locationWise: toNamedTotals(locMap),
+    vendorWise: toNamedTotals(venMap),
+  }
+}
+
 export interface DayTotal {
   date: string
   total: number

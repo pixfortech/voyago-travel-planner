@@ -15,6 +15,7 @@ interface DaySectionProps {
   onDeleteActivity: (dayId: string, activityId: string) => void
   onToggleConfirm: (dayId: string, activityId: string, confirmed: boolean) => void
   onCommentsClick?: (activityId: string, activityTitle: string) => void
+  onFoodInsightClick?: (dayId: string, activity: Activity) => void
 }
 
 function detectConflicts(activities: Activity[]): Set<string> {
@@ -43,6 +44,7 @@ export default function DaySection({
   onDeleteActivity,
   onToggleConfirm,
   onCommentsClick,
+  onFoodInsightClick,
 }: DaySectionProps) {
   const [expanded, setExpanded] = useState(true)
 
@@ -152,6 +154,11 @@ export default function DaySection({
                                     ? () => onCommentsClick(activity.id, activity.title)
                                     : undefined
                                 }
+                                onFoodInsightClick={
+                                  onFoodInsightClick
+                                    ? () => onFoodInsightClick(day.id, activity)
+                                    : undefined
+                                }
                               />
                             </div>
                           </div>
@@ -185,6 +192,11 @@ export default function DaySection({
                             onCommentsClick={
                               onCommentsClick
                                 ? () => onCommentsClick(activity.id, activity.title)
+                                : undefined
+                            }
+                            onFoodInsightClick={
+                              onFoodInsightClick
+                                ? () => onFoodInsightClick(day.id, activity)
                                 : undefined
                             }
                           />

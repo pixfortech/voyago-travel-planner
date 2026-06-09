@@ -139,6 +139,8 @@ export interface Activity {
   priceLevel?: number
   lat?: number
   lng?: number
+  // Phase 14 — saved AI food/café intelligence (optional; only for food places).
+  foodInsight?: FoodPlaceInsight
 }
 
 export interface ItineraryDay {
@@ -204,6 +206,39 @@ export interface Expense {
   locationName?: string
   linkedActivityId?: string
   createdAt: string
+  // ── Phase 14 — Bill attachment & spend analysis (all optional, backward-compatible) ──
+  // Bills are PRIVATE to trip members and are NEVER included in public share
+  // snapshots. We store only a Storage download URL + path, plus user-confirmed
+  // draft analysis fields — never raw OCR output or payment card data.
+  billImageUrl?: string
+  billStoragePath?: string
+  billOriginalFileName?: string
+  billContentType?: string
+  billSizeBytes?: number
+  billUploadedAt?: string          // ISO
+  billAnalysisStatus?: BillAnalysisStatus
+  billAnalysisSummary?: string
+  billExtractedVendor?: string
+  billExtractedDate?: string       // YYYY-MM-DD
+  billExtractedTotal?: number
+  billExtractedTax?: number
+  billExtractedItems?: BillExtractedItem[]
+  billConfidence?: BillConfidence
+}
+
+export type BillAnalysisStatus =
+  | 'none'        // no bill attached
+  | 'attached'    // image attached, not analysed
+  | 'draft'       // AI/manual draft created, awaiting confirmation
+  | 'confirmed'   // user confirmed the draft into the expense
+
+export type BillConfidence = 'low' | 'medium' | 'high'
+
+/** A single line item extracted (or manually entered) from a bill. */
+export interface BillExtractedItem {
+  name: string
+  quantity?: number
+  amount?: number
 }
 
 // ── Trip sharing (Phase 3) ────────────────────────────────────────────────
@@ -956,6 +991,120 @@ export interface ItineraryRatingResult {
 /** API response envelope for POST /api/ai/itinerary-rating. */
 export interface ItineraryRatingResponse {
   result: ItineraryRatingResult
+  isMock: boolean
+  provider: 'anthropic' | 'mock'
+  model: string
+}
+
+// ── Restaurant / Café Intelligence (Phase 14) ────────────────────────────────
+//
+// A safe, AI-derived insight for a single food place. Built from place METADATA
+// only (rating, price level, type) plus trip/budget context — never scraped menus
+// or review text. Recommended dishes are GENERIC unless the user supplies a real
+// menu/bill. All cost figures are approximate and clearly labelled as such.
+
+export type InsightConfidence = 'low' | 'medium' | 'high'
+
+/** Source of the metadata an insight was derived from. */
+export type FoodInsightSource = 'google_places' | 'manual' | 'mixed'
+
+export interface FoodPlaceInsight {
+  placeId?: string
+  placeName: string
+  placeAddress?: string
+  rating?: number
+  userRatingsTotal?: number
+  priceLevel?: number          // 0–4 (Google scale)
+  googleMapsUri?: string
+  businessStatus?: string
+  cuisineTags?: string[]
+  vibeSummary?: string
+  /** Clearly states it is based on available metadata, not full review text. */
+  reviewSummary?: string
+  /** Generic dish ideas unless a real menu/bill was provided. */
+  recommendedDishes?: string[]
+  budgetFit?: string
+  suitableGroupType?: string
+  orderingStrategy?: string
+  spendControlAdvice?: string
+  estimatedCostPerPersonMin?: number
+  estimatedCostPerPersonMax?: number
+  caveats?: string[]
+  confidence?: InsightConfidence
+  source?: FoodInsightSource
+  updatedAt?: string           // ISO — when the insight was generated
+}
+
+/** Privacy-safe input sent to POST /api/ai/food-place-insight. */
+export interface FoodPlaceInsightInput {
+  placeName: string
+  placeAddress?: string
+  rating?: number
+  userRatingsTotal?: number
+  priceLevel?: number
+  businessStatus?: string
+  placeTypes?: string[]
+  googleMapsUri?: string
+  tripName: string
+  destination: string
+  tripType: TripType
+  currency: string
+  travellerCount: number
+  /** Optional user-entered cuisine/preference notes. */
+  preferenceNotes?: string
+  /** Optional user-supplied dish/menu list — enables specific dish suggestions. */
+  providedMenuItems?: string[]
+}
+
+/** API response envelope for POST /api/ai/food-place-insight. */
+export interface FoodPlaceInsightResponse {
+  result: FoodPlaceInsight
+  isMock: boolean
+  provider: 'anthropic' | 'mock'
+  model: string
+}
+
+// ── Bill Spend Analysis (Phase 14) ───────────────────────────────────────────
+//
+// Analyses MANUALLY-ENTERED bill fields (image OCR/vision is Coming Soon) and
+// returns a structured DRAFT the user must confirm before any expense is
+// created/updated. Never silently overwrites an expense. Card numbers, phone
+// numbers and other sensitive payment data must be ignored/redacted.
+
+/** Privacy-safe input sent to POST /api/ai/bill-analysis. */
+export interface BillAnalysisInput {
+  tripName: string
+  destination: string
+  currency: string
+  travellerCount: number
+  /** Manually-entered bill fields. */
+  vendorName?: string
+  date?: string                // YYYY-MM-DD
+  total?: number
+  tax?: number
+  serviceCharge?: number
+  items?: BillExtractedItem[]
+  notes?: string
+}
+
+/** Structured draft returned to the client for confirmation. */
+export interface BillAnalysisResult {
+  summary: string
+  detectedVendor?: string
+  detectedDate?: string
+  detectedTotal?: number
+  detectedTax?: number
+  detectedItems: BillExtractedItem[]
+  suggestedCategory: ExpenseCategory
+  suggestedVendorType: VendorType
+  perPersonSplit?: number
+  confidence: BillConfidence
+  warnings: string[]
+}
+
+/** API response envelope for POST /api/ai/bill-analysis. */
+export interface BillAnalysisResponse {
+  result: BillAnalysisResult
   isMock: boolean
   provider: 'anthropic' | 'mock'
   model: string

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, Trash2, MapPin, Check, Package, MessageSquare } from 'lucide-react'
+import { ChevronDown, Trash2, MapPin, Check, Package, MessageSquare, Receipt } from 'lucide-react'
 import {
   formatCurrency,
   formatCurrencyPrecise,
@@ -24,6 +24,7 @@ interface ExpenseCardProps {
   onToggleReceived: (expense: Expense, travellerId: string) => void
   onDelete: (expenseId: string) => void
   onCommentsClick?: (expenseId: string, expenseTitle: string) => void
+  onBillClick?: (expense: Expense) => void
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -68,6 +69,7 @@ export default function ExpenseCard({
   onToggleReceived,
   onDelete,
   onCommentsClick,
+  onBillClick,
 }: ExpenseCardProps) {
   const [open, setOpen] = useState(false)
 
@@ -247,8 +249,19 @@ export default function ExpenseCard({
             </p>
           )}
 
+          {/* Bill attachment indicator */}
+          {(expense.billImageUrl || expense.billAnalysisStatus === 'confirmed') && (
+            <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
+              <Receipt size={11} />
+              Bill attached
+              {expense.billConfidence && (
+                <span className="text-emerald-400 font-medium">· {expense.billConfidence} confidence</span>
+              )}
+            </div>
+          )}
+
           {/* Action area */}
-          <div className="mt-3 flex items-center justify-between gap-2">
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
             {onCommentsClick && (
               <button
                 type="button"
@@ -256,6 +269,15 @@ export default function ExpenseCard({
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-primary-600 hover:bg-primary-50 px-3 py-1.5 rounded-lg transition-colors"
               >
                 <MessageSquare size={13} /> Discussion
+              </button>
+            )}
+            {onBillClick && (
+              <button
+                type="button"
+                onClick={() => onBillClick(expense)}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-violet-600 hover:bg-violet-50 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Receipt size={13} /> {expense.billImageUrl ? 'Bill' : 'Attach Bill'}
               </button>
             )}
             <button
