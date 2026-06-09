@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { getTrip, updateTrip } from '@/lib/firestore'
+import { getTrip, updateTrip, getItineraryDays } from '@/lib/firestore'
+import { getDatesInRange } from '@/lib/utils'
 import AppShell from '@/components/layout/AppShell'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
-import type { Trip, TripType } from '@/types'
+import DateChangeReflowModal from '@/components/trips/DateChangeReflowModal'
+import type { Trip, TripType, ItineraryDay } from '@/types'
 
 const TRIP_TYPES: { value: TripType; label: string; emoji: string }[] = [
   { value: 'solo', label: 'Solo', emoji: '🧳' },
@@ -33,6 +35,13 @@ export default function EditTripPage() {
   const [budget, setBudget] = useState('')
   const [currency, setCurrency] = useState('USD')
   const [notes, setNotes] = useState('')
+
+  // Reflow modal state
+  const [showReflow, setShowReflow] = useState(false)
+  const [allDays, setAllDays] = useState<ItineraryDay[]>([])
+  const [outOfRangeDays, setOutOfRangeDays] = useState<ItineraryDay[]>([])
+  // Pending non-date updates to apply after reflow
+  const [pendingUpdate, setPendingUpdate] = useState<Partial<Trip> | null>(null)
 
   useEffect(() => {
     if (!tripId) return
@@ -63,24 +72,71 @@ export default function EditTripPage() {
   }
 
   async function handleSave() {
-    if (!validate()) return
+    if (!validate() || !trip) return
     setSaving(true)
+
+    const nonDateUpdate: Partial<Trip> = {
+      name: name.trim(),
+      destination: destination.trim(),
+      type,
+      budget: parseFloat(budget) || 0,
+      currency,
+      notes: notes.trim(),
+    }
+
+    const datesChanged = startDate !== trip.startDate || endDate !== trip.endDate
+
+    if (datesChanged) {
+      // Check for out-of-range itinerary days before saving
+      try {
+        const days = await getItineraryDays(tripId)
+        const validDates = new Set(getDatesInRange(startDate, endDate))
+        const oor = days.filter((d) => !validDates.has(d.date))
+
+        if (oor.length > 0) {
+          setAllDays(days)
+          setOutOfRangeDays(oor)
+          setPendingUpdate(nonDateUpdate)
+          setSaving(false)
+          setShowReflow(true)
+          return
+        }
+      } catch {
+        // If we can't fetch days, just save normally
+      }
+    }
+
+    // No out-of-range days (or no date change): save everything at once
     try {
       await updateTrip(tripId, {
-        name: name.trim(),
-        destination: destination.trim(),
-        type,
+        ...nonDateUpdate,
         startDate,
         endDate,
-        budget: parseFloat(budget) || 0,
-        currency,
-        notes: notes.trim(),
       })
       router.push(`/trips/${tripId}`)
     } catch (err) {
       console.error(err)
       setSaving(false)
     }
+  }
+
+  async function handleReflowDone() {
+    // Reflow modal already saved the new dates + handled days.
+    // Apply the remaining non-date field updates now.
+    if (pendingUpdate) {
+      try {
+        await updateTrip(tripId, pendingUpdate)
+      } catch (err) {
+        console.error(err)
+      }
+    }
+    setShowReflow(false)
+    router.push(`/trips/${tripId}`)
+  }
+
+  function handleReflowCancel() {
+    setShowReflow(false)
+    setSaving(false)
   }
 
   if (loading) {
@@ -93,8 +149,7 @@ export default function EditTripPage() {
     )
   }
 
-  const datesChanged =
-    trip && (startDate !== trip.startDate || endDate !== trip.endDate)
+  const datesChanged = trip && (startDate !== trip.startDate || endDate !== trip.endDate)
 
   return (
     <AppShell title="Edit Trip" back={`/trips/${tripId}`} hideNav>
@@ -159,7 +214,7 @@ export default function EditTripPage() {
 
         {datesChanged && !errors.startDate && !errors.endDate && (
           <p className="text-xs text-amber-600 bg-amber-50 px-3 py-2.5 rounded-xl leading-relaxed">
-            Changing dates won&apos;t regenerate existing itinerary days.
+            You&apos;re changing the trip dates. Existing itinerary days will be checked for conflicts before saving.
           </p>
         )}
 
@@ -206,10 +261,25 @@ export default function EditTripPage() {
             Cancel
           </Button>
           <Button onClick={handleSave} className="flex-1" disabled={saving}>
-            {saving ? 'Saving…' : 'Save Changes'}
+            {saving ? 'Checking…' : 'Save Changes'}
           </Button>
         </div>
       </div>
+
+      {showReflow && trip && (
+        <DateChangeReflowModal
+          tripId={tripId}
+          tripName={name}
+          newStartDate={startDate}
+          newEndDate={endDate}
+          oldStartDate={trip.startDate}
+          oldEndDate={trip.endDate}
+          allDays={allDays}
+          outOfRangeDays={outOfRangeDays}
+          onDone={handleReflowDone}
+          onCancel={handleReflowCancel}
+        />
+      )}
     </AppShell>
   )
 }

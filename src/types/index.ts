@@ -831,6 +831,136 @@ export interface TripPoll {
   updatedAt?: string     // ISO
 }
 
+// ── AI Itinerary Reflow (Phase 13) ───────────────────────────────────────────
+//
+// When a trip's date range changes, any itinerary days that fall outside the new
+// range are "out-of-range". The user can choose from 5 reflow options. The AI
+// option calls POST /api/ai/itinerary-reflow which returns a structured preview
+// the user must confirm before any data is mutated.
+
+/** A single activity being moved or removed in a proposed reflow. */
+export interface ActivityReflowItem {
+  activityId: string
+  activityTitle: string
+  fromDayDate: string   // YYYY-MM-DD (original day date)
+  toDayDate?: string    // YYYY-MM-DD (target day date); absent = removed
+  reason?: string
+}
+
+/** A warning produced by the reflow analysis. */
+export interface ReflowWarning {
+  type: 'completed_day_skipped' | 'activity_removed' | 'day_gap' | 'timing_conflict' | 'general'
+  message: string
+}
+
+/** Input sent to the AI reflow endpoint. Contains no secrets. */
+export interface ItineraryReflowInput {
+  tripName: string
+  destination: string
+  oldStartDate: string
+  oldEndDate: string
+  newStartDate: string
+  newEndDate: string
+  today: string   // YYYY-MM-DD (to identify completed days)
+  protectCompleted: boolean
+  outOfRangeDays: Array<{
+    dayNumber: number
+    date: string
+    isCompleted: boolean
+    activities: Array<{ id: string; title: string; time: string; notes: string }>
+  }>
+  validDates: string[]   // dates in new range that can receive activities
+}
+
+/** A proposed day in the reflow result. */
+export interface ReflowProposedDay {
+  date: string
+  dayNumber: number
+  activities: Array<{ id: string; title: string; time: string; notes: string }>
+}
+
+/** Structured preview returned to the client from the AI reflow endpoint. */
+export interface ItineraryReflowResult {
+  summary: string
+  movedActivities: ActivityReflowItem[]
+  removedDays: Array<{ date: string; dayNumber: number; reason: string }>
+  proposedDays: ReflowProposedDay[]
+  timingNotes: string[]
+  costImpact: string
+  routeImpact: string
+  warnings: ReflowWarning[]
+}
+
+/** API response envelope for POST /api/ai/itinerary-reflow. */
+export interface ItineraryReflowResponse {
+  result: ItineraryReflowResult
+  isMock: boolean
+  provider: 'anthropic' | 'mock'
+  model: string
+}
+
+// ── AI Itinerary Rating (Phase 13) ───────────────────────────────────────────
+//
+// Rates the current itinerary on multiple dimensions. Called from the reports
+// page (itinerary report). Result is shown as a card for the user to review.
+
+export type RatingLevel = 'excellent' | 'good' | 'caution' | 'risky'
+
+/** A single dimension score in the rating result. */
+export interface ItineraryRatingDimension {
+  name: string
+  level: RatingLevel
+  score: number   // 1–10
+  reason: string
+  improvements: string[]
+}
+
+/** Input sent to the AI rating endpoint. Contains no secrets. */
+export interface ItineraryRatingInput {
+  tripName: string
+  destination: string
+  tripType: TripType
+  startDate: string
+  endDate: string
+  currency: string
+  budget: number
+  totalSpent: number
+  travellerCount: number
+  days: Array<{
+    dayNumber: number
+    date: string
+    activityCount: number
+    activities: Array<{
+      title: string
+      type: ActivityType
+      time: string
+      estimatedCost?: number
+      locationName?: string
+    }>
+  }>
+  totalActivityCount: number
+  hasRouteData: boolean
+  totalDistanceKm: number
+}
+
+/** Structured rating returned to the client. */
+export interface ItineraryRatingResult {
+  overallScore: number   // 1–10
+  overallLevel: RatingLevel
+  summary: string
+  dimensions: ItineraryRatingDimension[]
+  topStrengths: string[]
+  topImprovements: string[]
+}
+
+/** API response envelope for POST /api/ai/itinerary-rating. */
+export interface ItineraryRatingResponse {
+  result: ItineraryRatingResult
+  isMock: boolean
+  provider: 'anthropic' | 'mock'
+  model: string
+}
+
 /** Result returned by POST /api/maps/route/optimise. */
 export interface OptimiseRouteResult {
   mode: RouteOptimiseMode

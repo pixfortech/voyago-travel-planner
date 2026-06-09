@@ -2,21 +2,28 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Printer, ArrowLeft, Download } from 'lucide-react'
+import { Printer, ArrowLeft, Download, UtensilsCrossed, Image, Lock } from 'lucide-react'
 import Link from 'next/link'
 import {
   getTrip, getExpenses, getMemories, getItineraryDays, getLocationPoints,
 } from '@/lib/firestore'
+import { getTasks } from '@/lib/planning'
+import {
+  getDocs, collection,
+} from 'firebase/firestore'
+import { db } from '@/lib/firebase'
 import {
   getTotalSpent, getRemainingBudget, getCategoryTotals, getVendorTypeTotals,
-  getDayWiseTotals, getTravellerBalances, getSettlementSummary,
+  getDayWiseTotals, getTravellerBalances, getSettlementSummary, getPerHeadActualCost,
 } from '@/lib/calculations'
 import { computeTripDistance } from '@/lib/location/distance'
 import { buildPlaybackPoints } from '@/lib/location/playback'
 import { downloadExpensesCSV, downloadSettlementCSV } from '@/lib/export'
 import { formatDate, formatCurrency, getDayCount, tripTypeLabel } from '@/lib/utils'
+import ItineraryRatingCard from '@/components/trips/ItineraryRatingCard'
 import type {
   Trip, Expense, TripMemory, ItineraryDay, TripLocationPoint,
+  TripTask, ItineraryRatingInput,
 } from '@/types'
 
 const REPORT_TITLES: Record<string, string> = {
@@ -48,31 +55,73 @@ function StatPill({ label, value }: { label: string; value: string }) {
   )
 }
 
-// ── Report sections ──────────────────────────────────────────────────────────
+// ── Enhanced Trip Header ──────────────────────────────────────────────────────
 
-function TripHeader({ trip, expenses }: { trip: Trip; expenses: Expense[] }) {
-  const days = getDayCount(trip.startDate, trip.endDate)
+function TripHeader({
+  trip,
+  expenses,
+  days,
+  memories,
+  tasks,
+  pollCount,
+  totalDistanceKm,
+}: {
+  trip: Trip
+  expenses: Expense[]
+  days: ItineraryDay[]
+  memories: TripMemory[]
+  tasks: TripTask[]
+  pollCount: number
+  totalDistanceKm: number
+}) {
+  const dayCount = getDayCount(trip.startDate, trip.endDate)
   const spent = getTotalSpent(expenses)
   const remaining = trip.budget > 0 ? getRemainingBudget(trip.budget, expenses) : null
+  const perHead = (trip.travellers?.length ?? 0) > 0
+    ? getPerHeadActualCost(expenses, trip.travellers!.length)
+    : null
+  const completedTasks = tasks.filter((t) => t.status === 'done').length
+  const activityCount = days.reduce((n, d) => n + d.activities.length, 0)
 
   return (
     <Section title="Trip Overview">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatPill label="Destination" value={trip.destination} />
-        <StatPill label="Duration" value={`${days} day${days !== 1 ? 's' : ''}`} />
+        <StatPill label="Duration" value={`${dayCount} day${dayCount !== 1 ? 's' : ''}`} />
         <StatPill label="Dates" value={`${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}`} />
         <StatPill label="Type" value={tripTypeLabel(trip.type)} />
         {expenses.length > 0 && (
           <StatPill label="Total Spent" value={formatCurrency(spent, trip.currency)} />
         )}
         {remaining !== null && (
-          <StatPill label={remaining < 0 ? 'Over Budget' : 'Remaining'} value={formatCurrency(Math.abs(remaining), trip.currency)} />
+          <StatPill
+            label={remaining < 0 ? 'Over Budget' : 'Remaining'}
+            value={formatCurrency(Math.abs(remaining), trip.currency)}
+          />
         )}
         {trip.budget > 0 && (
           <StatPill label="Budget" value={formatCurrency(trip.budget, trip.currency)} />
         )}
+        {perHead !== null && perHead > 0 && (
+          <StatPill label="Per Head" value={formatCurrency(perHead, trip.currency)} />
+        )}
         {(trip.travellers?.length ?? 0) > 0 && (
           <StatPill label="Travellers" value={String(trip.travellers!.length)} />
+        )}
+        {activityCount > 0 && (
+          <StatPill label="Activities" value={String(activityCount)} />
+        )}
+        {memories.length > 0 && (
+          <StatPill label="Memories" value={String(memories.length)} />
+        )}
+        {tasks.length > 0 && (
+          <StatPill label="Tasks" value={`${completedTasks}/${tasks.length} done`} />
+        )}
+        {pollCount > 0 && (
+          <StatPill label="Polls" value={String(pollCount)} />
+        )}
+        {totalDistanceKm > 0 && (
+          <StatPill label="Distance" value={`${totalDistanceKm} km`} />
         )}
       </div>
       {trip.notes && (
@@ -84,6 +133,8 @@ function TripHeader({ trip, expenses }: { trip: Trip; expenses: Expense[] }) {
     </Section>
   )
 }
+
+// ── Itinerary Section ─────────────────────────────────────────────────────────
 
 function ItinerarySection({ days }: { days: ItineraryDay[] }) {
   if (days.length === 0) return (
@@ -134,10 +185,25 @@ function ItinerarySection({ days }: { days: ItineraryDay[] }) {
   )
 }
 
-function BudgetSection({ trip, expenses, onCSV }: { trip: Trip; expenses: Expense[]; onCSV: () => void }) {
+// ── Budget Section ────────────────────────────────────────────────────────────
+
+function BudgetSection({
+  trip,
+  expenses,
+  onCSV,
+  perHeadSpend,
+}: {
+  trip: Trip
+  expenses: Expense[]
+  onCSV: () => void
+  perHeadSpend: number | null
+}) {
   const spent = getTotalSpent(expenses)
   const categoryTotals = getCategoryTotals(expenses)
+  const vendorTotals = getVendorTypeTotals(expenses)
   const dayTotals = getDayWiseTotals(expenses)
+  const travellers = trip.travellers ?? []
+  const balances = getTravellerBalances(expenses, travellers)
 
   return (
     <>
@@ -152,6 +218,15 @@ function BudgetSection({ trip, expenses, onCSV }: { trip: Trip; expenses: Expens
                 value={formatCurrency(Math.abs(trip.budget - spent), trip.currency)}
               />
             </>
+          )}
+          {perHeadSpend !== null && perHeadSpend > 0 && (
+            <StatPill label="Per Head Spent" value={formatCurrency(perHeadSpend, trip.currency)} />
+          )}
+          {trip.budget > 0 && perHeadSpend !== null && (trip.travellers?.length ?? 0) > 0 && (
+            <StatPill
+              label="Per Head Budget"
+              value={formatCurrency(trip.budget / trip.travellers!.length, trip.currency)}
+            />
           )}
         </div>
         <button
@@ -179,6 +254,45 @@ function BudgetSection({ trip, expenses, onCSV }: { trip: Trip; expenses: Expens
                 </div>
               )
             })}
+          </div>
+        </Section>
+      )}
+
+      {vendorTotals.length > 0 && (
+        <Section title="By Vendor Type">
+          <div className="space-y-2">
+            {vendorTotals.map((v) => {
+              const pct = spent > 0 ? Math.round((v.total / spent) * 100) : 0
+              return (
+                <div key={v.vendorType} className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-gray-700 capitalize w-28 flex-shrink-0">{v.vendorType}</span>
+                  <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-violet-400 rounded-full" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-sm font-bold text-gray-700 w-24 text-right">{formatCurrency(v.total, trip.currency)}</span>
+                  <span className="text-xs text-gray-400 w-10 text-right">{pct}%</span>
+                </div>
+              )
+            })}
+          </div>
+        </Section>
+      )}
+
+      {travellers.length > 1 && balances.length > 0 && (
+        <Section title="Spend by Traveller">
+          <div className="space-y-2">
+            {balances.map((b) => (
+              <div key={b.travellerId} className="flex items-center gap-3">
+                <span
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0"
+                  style={{ backgroundColor: b.color }}
+                >
+                  {b.initials}
+                </span>
+                <span className="text-sm font-medium text-gray-700 flex-1">{b.name}</span>
+                <span className="text-sm font-bold text-gray-700">{formatCurrency(b.totalPaid, trip.currency)}</span>
+              </div>
+            ))}
           </div>
         </Section>
       )}
@@ -234,13 +348,28 @@ function BudgetSection({ trip, expenses, onCSV }: { trip: Trip; expenses: Expens
   )
 }
 
+// ── Settlement Section ────────────────────────────────────────────────────────
+
 function SettlementSection({ trip, expenses, onCSV }: { trip: Trip; expenses: Expense[]; onCSV: () => void }) {
   const travellers = trip.travellers ?? []
   const balances = getTravellerBalances(expenses, travellers)
   const settlements = getSettlementSummary(balances)
 
+  // Settlement stats
+  const pendingCount = settlements.length
+  const pendingTotal = settlements.reduce((n, s) => n + s.amount, 0)
+
   return (
     <>
+      {pendingCount > 0 && (
+        <Section title="Settlement Summary">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+            <StatPill label="Pending Transfers" value={String(pendingCount)} />
+            <StatPill label="Total Pending" value={formatCurrency(pendingTotal, trip.currency)} />
+          </div>
+        </Section>
+      )}
+
       <Section title="Traveller Balances">
         <table className="w-full text-sm">
           <thead>
@@ -256,7 +385,10 @@ function SettlementSection({ trip, expenses, onCSV }: { trip: Trip; expenses: Ex
               <tr key={b.travellerId} className="border-b border-gray-50">
                 <td className="py-1.5">
                   <span className="inline-flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0" style={{ backgroundColor: b.color }}>
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0"
+                      style={{ backgroundColor: b.color }}
+                    >
                       {b.initials}
                     </span>
                     <span className="font-medium text-gray-700">{b.name}</span>
@@ -279,13 +411,22 @@ function SettlementSection({ trip, expenses, onCSV }: { trip: Trip; expenses: Ex
         ) : (
           <div className="space-y-2">
             {settlements.map((s, i) => (
-              <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 print:border print:border-gray-200 print:bg-white">
-                <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0" style={{ backgroundColor: s.fromColor }}>
+              <div
+                key={i}
+                className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 print:border print:border-gray-200 print:bg-white"
+              >
+                <span
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0"
+                  style={{ backgroundColor: s.fromColor }}
+                >
                   {s.fromName.slice(0, 2).toUpperCase()}
                 </span>
                 <span className="text-sm font-semibold text-gray-700">{s.fromName}</span>
                 <span className="text-xs text-gray-400 flex-1">owes</span>
-                <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0" style={{ backgroundColor: s.toColor }}>
+                <span
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-black flex-shrink-0"
+                  style={{ backgroundColor: s.toColor }}
+                >
                   {s.toName.slice(0, 2).toUpperCase()}
                 </span>
                 <span className="text-sm font-semibold text-gray-700">{s.toName}</span>
@@ -306,7 +447,14 @@ function SettlementSection({ trip, expenses, onCSV }: { trip: Trip; expenses: Ex
   )
 }
 
-function RouteSection({ trip, locationPoints, days, memories }: {
+// ── Route Section ─────────────────────────────────────────────────────────────
+
+function RouteSection({
+  trip,
+  locationPoints,
+  days,
+  memories,
+}: {
   trip: Trip
   locationPoints: TripLocationPoint[]
   days: ItineraryDay[]
@@ -314,9 +462,8 @@ function RouteSection({ trip, locationPoints, days, memories }: {
 }) {
   const playbackPoints = buildPlaybackPoints(days, locationPoints, memories)
   const distanceSummary = computeTripDistance(playbackPoints)
-
-  const checkins = locationPoints.filter(p => p.source !== 'live_tracking')
-  const livePoints = locationPoints.filter(p => p.source === 'live_tracking')
+  const checkins = locationPoints.filter((p) => p.source !== 'live_tracking')
+  const livePoints = locationPoints.filter((p) => p.source === 'live_tracking')
 
   return (
     <Section title="Route Summary">
@@ -324,7 +471,10 @@ function RouteSection({ trip, locationPoints, days, memories }: {
         <StatPill label="Total Points" value={String(playbackPoints.length)} />
         <StatPill label="Check-ins" value={String(checkins.length)} />
         <StatPill label="Live Track Pts" value={String(livePoints.length)} />
-        <StatPill label="Distance (approx)" value={distanceSummary.totalKm > 0 ? `${distanceSummary.totalKm} km` : '—'} />
+        <StatPill
+          label="Distance (approx)"
+          value={distanceSummary.totalKm > 0 ? `${distanceSummary.totalKm} km` : '—'}
+        />
       </div>
 
       {checkins.length > 0 && (
@@ -333,7 +483,9 @@ function RouteSection({ trip, locationPoints, days, memories }: {
           <div className="space-y-1.5">
             {checkins.map((p) => (
               <div key={p.id} className="flex items-center gap-3 text-sm">
-                <span className="text-gray-400 text-[11px] w-32 flex-shrink-0">{formatDate(p.capturedAt.slice(0, 10))}</span>
+                <span className="text-gray-400 text-[11px] w-32 flex-shrink-0">
+                  {formatDate(p.capturedAt.slice(0, 10))}
+                </span>
                 <span className="text-gray-700 font-medium">{p.label || 'Unnamed check-in'}</span>
                 {p.note && <span className="text-gray-400 text-xs">— {p.note}</span>}
               </div>
@@ -349,9 +501,11 @@ function RouteSection({ trip, locationPoints, days, memories }: {
   )
 }
 
+// ── Memories Section ──────────────────────────────────────────────────────────
+
 function MemoriesSection({ memories, days }: { memories: TripMemory[]; days: ItineraryDay[] }) {
   const dayMap = new Map<string, string>()
-  days.forEach(d => dayMap.set(d.date, `Day ${d.dayNumber}`))
+  days.forEach((d) => dayMap.set(d.date, `Day ${d.dayNumber}`))
 
   const grouped = new Map<string, TripMemory[]>()
   const ungrouped: TripMemory[] = []
@@ -430,6 +584,96 @@ function MemoriesSection({ memories, days }: { memories: TripMemory[]; days: Iti
   )
 }
 
+// ── Restaurant Intelligence Placeholder (Phase 13 Part 7) ────────────────────
+// Architecture is in place; full data integration requires the Places API
+// pipeline and will be delivered in a future phase.
+
+function RestaurantIntelligencePlaceholder() {
+  return (
+    <Section title="Restaurant Intelligence">
+      <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-center">
+        <div className="w-10 h-10 bg-orange-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <UtensilsCrossed size={20} className="text-orange-500" />
+        </div>
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <p className="text-sm font-bold text-gray-700">Restaurant &amp; Café Recommendations</p>
+          <span className="text-[10px] font-black text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full uppercase tracking-wide">
+            Coming Soon
+          </span>
+        </div>
+        <p className="text-xs text-gray-400 max-w-xs mx-auto leading-relaxed">
+          AI-curated restaurant picks near your itinerary stops, based on your preferences, budget, and trip type. Powered by Places API.
+        </p>
+      </div>
+    </Section>
+  )
+}
+
+// ── Bill Upload Placeholder (Phase 13 Part 8) ────────────────────────────────
+// Architecture placeholder. OCR and automatic extraction will be added in a
+// future phase; manual confirmation and data entry remain the primary flow.
+
+function BillUploadPlaceholder() {
+  return (
+    <Section title="Bill Upload">
+      <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-center">
+        <div className="w-10 h-10 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <Image size={20} className="text-blue-500" />
+        </div>
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <p className="text-sm font-bold text-gray-700">Bill Image Upload</p>
+          <span className="text-[10px] font-black text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full uppercase tracking-wide">
+            Coming Soon
+          </span>
+        </div>
+        <p className="text-xs text-gray-400 max-w-xs mx-auto leading-relaxed">
+          Upload photos of receipts and bills. Manual entry is always available; automatic extraction will be added in a future phase.
+        </p>
+        <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-gray-400">
+          <Lock size={11} />
+          <span>Bills are private to trip members only</span>
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+// ── Itinerary Rating Input Builder ────────────────────────────────────────────
+
+function buildRatingInput(
+  trip: Trip,
+  days: ItineraryDay[],
+  totalDistanceKm: number,
+  totalSpent: number,
+): ItineraryRatingInput {
+  return {
+    tripName: trip.name,
+    destination: trip.destination,
+    tripType: trip.type,
+    startDate: trip.startDate,
+    endDate: trip.endDate,
+    currency: trip.currency,
+    budget: trip.budget,
+    totalSpent,
+    travellerCount: trip.travellers?.length ?? 1,
+    days: days.map((d) => ({
+      dayNumber: d.dayNumber,
+      date: d.date,
+      activityCount: d.activities.length,
+      activities: d.activities.map((a) => ({
+        title: a.title,
+        type: a.type,
+        time: a.time,
+        estimatedCost: a.estimatedCost,
+        locationName: a.locationName,
+      })),
+    })),
+    totalActivityCount: days.reduce((n, d) => n + d.activities.length, 0),
+    hasRouteData: totalDistanceKm > 0,
+    totalDistanceKm,
+  }
+}
+
 // ── Main page component ───────────────────────────────────────────────────────
 
 export default function ReportViewPage() {
@@ -440,6 +684,9 @@ export default function ReportViewPage() {
   const [memories, setMemories] = useState<TripMemory[]>([])
   const [days, setDays] = useState<ItineraryDay[]>([])
   const [locationPoints, setLocationPoints] = useState<TripLocationPoint[]>([])
+  const [tasks, setTasks] = useState<TripTask[]>([])
+  const [pollCount, setPollCount] = useState(0)
+  const [totalDistanceKm, setTotalDistanceKm] = useState(0)
   const [loading, setLoading] = useState(true)
 
   const reportTitle = REPORT_TITLES[type] ?? 'Report'
@@ -452,13 +699,23 @@ export default function ReportViewPage() {
       getMemories(tripId),
       getItineraryDays(tripId),
       getLocationPoints(tripId),
-    ]).then(([t, e, m, d, lp]) => {
+      getTasks(tripId),
+      getDocs(collection(db, 'trips', tripId, 'polls')),
+    ]).then(([t, e, m, d, lp, tk, pollSnap]) => {
       if (!t) { router.push('/dashboard'); return }
       setTrip(t)
       setExpenses(e)
       setMemories(m)
       setDays(d)
       setLocationPoints(lp)
+      setTasks(tk)
+      setPollCount(pollSnap.size)
+
+      // Compute distance from playback points
+      const pp = buildPlaybackPoints(d, lp, m)
+      const dist = computeTripDistance(pp)
+      setTotalDistanceKm(dist.totalKm)
+
       setLoading(false)
     })
   }, [tripId, router])
@@ -474,6 +731,13 @@ export default function ReportViewPage() {
       </div>
     )
   }
+
+  const totalSpent = getTotalSpent(expenses)
+  const perHeadSpend = (trip.travellers?.length ?? 0) > 0
+    ? getPerHeadActualCost(expenses, trip.travellers!.length)
+    : null
+
+  const ratingInput = buildRatingInput(trip, days, totalDistanceKm, totalSpent)
 
   return (
     <>
@@ -542,16 +806,30 @@ export default function ReportViewPage() {
             </p>
           </div>
 
-          {/* Render appropriate sections */}
+          {/* Full Trip Recap */}
           {type === 'full' && (
             <>
-              <TripHeader trip={trip} expenses={expenses} />
+              <TripHeader
+                trip={trip}
+                expenses={expenses}
+                days={days}
+                memories={memories}
+                tasks={tasks}
+                pollCount={pollCount}
+                totalDistanceKm={totalDistanceKm}
+              />
               <ItinerarySection days={days} />
+              {days.length > 0 && (
+                <Section title="AI Itinerary Rating">
+                  <ItineraryRatingCard input={ratingInput} printable={false} />
+                </Section>
+              )}
               {expenses.length > 0 && (
                 <BudgetSection
                   trip={trip}
                   expenses={expenses}
                   onCSV={() => downloadExpensesCSV(expenses, trip)}
+                  perHeadSpend={perHeadSpend}
                 />
               )}
               {expenses.length > 0 && (trip.travellers?.length ?? 0) > 1 && (
@@ -562,24 +840,42 @@ export default function ReportViewPage() {
                 />
               )}
               {memories.length > 0 && <MemoriesSection memories={memories} days={days} />}
+              <RestaurantIntelligencePlaceholder />
             </>
           )}
 
+          {/* Itinerary Report */}
           {type === 'itinerary' && (
             <>
-              <TripHeader trip={trip} expenses={[]} />
+              <TripHeader
+                trip={trip}
+                expenses={[]}
+                days={days}
+                memories={memories}
+                tasks={tasks}
+                pollCount={pollCount}
+                totalDistanceKm={totalDistanceKm}
+              />
               <ItinerarySection days={days} />
+              {days.length > 0 && (
+                <Section title="AI Itinerary Rating">
+                  <ItineraryRatingCard input={ratingInput} printable={false} />
+                </Section>
+              )}
             </>
           )}
 
+          {/* Budget Report */}
           {type === 'budget' && (
             <BudgetSection
               trip={trip}
               expenses={expenses}
               onCSV={() => downloadExpensesCSV(expenses, trip)}
+              perHeadSpend={perHeadSpend}
             />
           )}
 
+          {/* Settlement Report */}
           {type === 'settlement' && (
             <SettlementSection
               trip={trip}
@@ -588,6 +884,7 @@ export default function ReportViewPage() {
             />
           )}
 
+          {/* Route Summary */}
           {type === 'route' && (
             <RouteSection
               trip={trip}
@@ -597,8 +894,14 @@ export default function ReportViewPage() {
             />
           )}
 
+          {/* Memories Album */}
           {type === 'memories' && (
             <MemoriesSection memories={memories} days={days} />
+          )}
+
+          {/* Bill Upload placeholder in budget report */}
+          {type === 'budget' && (
+            <BillUploadPlaceholder />
           )}
 
           {/* Footer — print only */}

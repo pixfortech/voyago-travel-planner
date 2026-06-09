@@ -183,6 +183,25 @@ export async function getItineraryDays(tripId: string): Promise<ItineraryDay[]> 
   return snap.docs.map((d) => d.data() as ItineraryDay)
 }
 
+export async function updateItineraryDay(
+  tripId: string,
+  dayId: string,
+  updates: Partial<Pick<ItineraryDay, 'date' | 'dayNumber' | 'activities'>>,
+): Promise<void> {
+  await updateDoc(doc(db, 'trips', tripId, 'days', dayId), updates)
+}
+
+export async function deleteItineraryDay(tripId: string, dayId: string): Promise<void> {
+  await deleteDoc(doc(db, 'trips', tripId, 'days', dayId))
+}
+
+export async function addItineraryDay(
+  tripId: string,
+  day: ItineraryDay,
+): Promise<void> {
+  await setDoc(doc(db, 'trips', tripId, 'days', day.id), pruneUndefined(day))
+}
+
 export async function addActivity(
   tripId: string,
   dayId: string,
