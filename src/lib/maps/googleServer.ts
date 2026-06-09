@@ -53,7 +53,82 @@ export function isMapsAvailable(): boolean {
   return isFeatureEnabled('mapFeatures') && isMapsServerConfigured()
 }
 
+// ── Maps API error classification ───────────────────────────────────────────
+
+/** Friendly, non-leaking error codes the route handler returns to the client. */
+export type MapsApiErrorCode =
+  | 'google_bad_request'
+  | 'google_field_mask_invalid'
+  | 'google_permission_denied'
+  | 'google_api_not_enabled'
+  | 'google_quota_exceeded'
+  | 'google_invalid_key'
+  | 'maps_request_failed'
+
+export class MapsApiError extends Error {
+  readonly code: MapsApiErrorCode
+  /** Upstream Google HTTP status (for logging only). */
+  readonly upstreamStatus: number
+  /** Short, key-free detail safe to surface to the client. */
+  readonly detail: string
+  constructor(code: MapsApiErrorCode, upstreamStatus: number, detail: string) {
+    super(code)
+    this.name = 'MapsApiError'
+    this.code = code
+    this.upstreamStatus = upstreamStatus
+    this.detail = detail
+  }
+}
+
+/** Google's structured error envelope (returned in the response body on failure). */
+interface GoogleErrorEnvelope {
+  error?: { code?: number; message?: string; status?: string }
+}
+
+/**
+ * Map a Google API HTTP status + error envelope to one of our friendly codes.
+ * Never includes the API key (Google never echoes it; we also never log it).
+ */
+function classifyGoogleError(httpStatus: number, env: GoogleErrorEnvelope | null): MapsApiError {
+  const gStatus = env?.error?.status ?? ''
+  const gMessage = env?.error?.message ?? ''
+  const m = gMessage.toLowerCase()
+  const detail = gMessage.slice(0, 300) || `Google returned HTTP ${httpStatus}.`
+
+  // Field-mask problems come back as 400 INVALID_ARGUMENT mentioning the mask.
+  if (httpStatus === 400 && (m.includes('field mask') || m.includes('fieldmask') || m.includes('field_mask'))) {
+    return new MapsApiError('google_field_mask_invalid', httpStatus, detail)
+  }
+
+  switch (httpStatus) {
+    case 400:
+      return new MapsApiError('google_bad_request', httpStatus, detail)
+    case 401:
+      return new MapsApiError('google_invalid_key', httpStatus, detail)
+    case 403:
+      // "has not been used in project … or it is disabled" ⇒ API not enabled.
+      if (gStatus === 'PERMISSION_DENIED' &&
+          (m.includes('has not been used') || m.includes('is disabled') ||
+           m.includes('not enabled') || m.includes('enable it'))) {
+        return new MapsApiError('google_api_not_enabled', httpStatus, detail)
+      }
+      // Invalid/blocked key surfaces as 403 too.
+      if (m.includes('api key') || m.includes('api_key') || m.includes('invalid key')) {
+        return new MapsApiError('google_invalid_key', httpStatus, detail)
+      }
+      return new MapsApiError('google_permission_denied', httpStatus, detail)
+    case 429:
+      return new MapsApiError('google_quota_exceeded', httpStatus, detail)
+    default:
+      return new MapsApiError('maps_request_failed', httpStatus, detail)
+  }
+}
+
 // ── Places (New) text search ────────────────────────────────────────────────
+
+const PLACES_SEARCH_ENDPOINT = 'https://places.googleapis.com/v1/places:searchText'
+const PLACES_SEARCH_FIELD_MASK =
+  'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.location,places.types'
 
 const PRICE_LEVEL_MAP: Record<string, number> = {
   PRICE_LEVEL_FREE: 0,
@@ -86,13 +161,12 @@ export async function searchPlaces(
   const key = getServerMapsKey()
   if (!key) throw new Error('maps_not_configured')
 
-  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+  const res = await fetch(PLACES_SEARCH_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': key,
-      'X-Goog-FieldMask':
-        'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.location,places.types',
+      'X-Goog-FieldMask': PLACES_SEARCH_FIELD_MASK,
     },
     body: JSON.stringify({
       textQuery: query,
@@ -103,9 +177,20 @@ export async function searchPlaces(
   })
 
   if (!res.ok) {
-    const status = res.status
-    if (status === 403 || status === 401) throw new Error('maps_auth_error')
-    throw new Error(`maps_request_failed_${status}`)
+    // Read Google's structured error so we can classify + log it (key-free).
+    const env = (await res.json().catch(() => null)) as GoogleErrorEnvelope | null
+    const apiErr = classifyGoogleError(res.status, env)
+    // Safe server log: endpoint + field mask + Google status/code/message. Never the key.
+    console.error('[Voyago Maps] places:searchText failed', {
+      endpoint: PLACES_SEARCH_ENDPOINT,
+      fieldMask: PLACES_SEARCH_FIELD_MASK,
+      httpStatus: res.status,
+      googleStatus: env?.error?.status ?? null,
+      googleCode: env?.error?.code ?? null,
+      googleMessage: env?.error?.message ?? null,
+      mappedCode: apiErr.code,
+    })
+    throw apiErr
   }
 
   const data = (await res.json()) as { places?: RawPlace[] }

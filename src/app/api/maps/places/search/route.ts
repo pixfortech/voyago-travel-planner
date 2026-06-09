@@ -10,8 +10,19 @@
  */
 
 import { NextResponse } from 'next/server'
-import { isMapsAvailable, searchPlaces } from '@/lib/maps/googleServer'
+import { isMapsAvailable, searchPlaces, MapsApiError, type MapsApiErrorCode } from '@/lib/maps/googleServer'
 import { rateLimit, clientKey } from '@/lib/server/rateLimit'
+
+/** HTTP status to return for each friendly error code. */
+const ERROR_STATUS: Record<MapsApiErrorCode, number> = {
+  google_bad_request: 400,
+  google_field_mask_invalid: 500,
+  google_permission_denied: 502,
+  google_api_not_enabled: 502,
+  google_quota_exceeded: 429,
+  google_invalid_key: 502,
+  maps_request_failed: 502,
+}
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -45,14 +56,22 @@ export async function POST(request: Request) {
     const results = await searchPlaces(query.trim())
     return NextResponse.json({ results })
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('[Voyago Maps] place search error:', err)
+    // Classified upstream Google failures → useful, key-free JSON.
+    if (err instanceof MapsApiError) {
+      return NextResponse.json(
+        { error: err.code, detail: err.detail },
+        { status: ERROR_STATUS[err.code] ?? 502 },
+      )
     }
-    const message = err instanceof Error ? err.message : 'unknown'
-    const status = message === 'maps_auth_error' ? 502 : 502
+    // No key configured (feature flag on but key missing at call time).
+    if (err instanceof Error && err.message === 'maps_not_configured') {
+      return NextResponse.json({ error: 'maps_unavailable' }, { status: 503 })
+    }
+    // Transport / unexpected failure.
+    console.error('[Voyago Maps] place search unexpected error:', err instanceof Error ? err.message : 'unknown')
     return NextResponse.json(
-      { error: 'maps_search_failed', message: 'Place search is temporarily unavailable.' },
-      { status }
+      { error: 'maps_request_failed', detail: 'Place search is temporarily unavailable.' },
+      { status: 502 },
     )
   }
 }
