@@ -4,20 +4,23 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Sparkles, MessageSquare, HelpCircle, LayoutGrid,
-  ChevronRight, AlertTriangle, Loader2,
+  ChevronRight, AlertTriangle, Loader2, Home, Wallet, Upload, Check,
 } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import { createTrip, updateItineraryDay, getItineraryDays } from '@/lib/firestore'
 import AppShell from '@/components/layout/AppShell'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
-import GeneratedItineraryPreview, { type EditableGeneratedDay } from '@/components/ai/GeneratedItineraryPreview'
+import GeneratedItineraryPreview, {
+  type EditableGeneratedDay, type PreviewBudgetContext,
+} from '@/components/ai/GeneratedItineraryPreview'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import { getDayCount } from '@/lib/utils'
 import { categoryToActivityType } from '@/lib/maps/categoryMapping'
 import type {
   TripType, TripGenerationPreferences, TripInterest, FoodPreference,
   TravelPace, TripGeneratorInput, TripGeneratorResult, Activity,
+  BudgetInclusion, BudgetCategoryKey, StayBaseMode, PlannedTransport, PlannedStay,
 } from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -47,7 +50,25 @@ interface TripBrief {
   tripType: TripType
   composition: { total: number; couples?: number; adults?: number; kids?: number; seniors?: number; notes?: string }
   preferences: TripGenerationPreferences
+  // Phase 15D
+  stayBaseMode: StayBaseMode
+  stayBase: string                 // known hotel/area (when stayBaseMode === 'known')
+  budgetIncluded: BudgetInclusion
+  transport: PlannedTransport
+  stay: PlannedStay
 }
+
+const BUDGET_CATS: { key: BudgetCategoryKey; label: string }[] = [
+  { key: 'stay', label: 'Stay / hotel' },
+  { key: 'transport_to', label: 'Transport to destination' },
+  { key: 'local_transport', label: 'Local transport' },
+  { key: 'food', label: 'Food' },
+  { key: 'activities', label: 'Activities / tickets' },
+  { key: 'shopping', label: 'Shopping' },
+  { key: 'buffer', label: 'Emergency buffer' },
+]
+
+const TRANSPORT_MODES: PlannedTransport['mode'][] = ['train', 'flight', 'bus', 'car', 'other']
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -119,6 +140,15 @@ function defaultBrief(): TripBrief {
       mustVisit: [],
       avoidPlaces: [],
     },
+    stayBaseMode: 'later',
+    stayBase: '',
+    // Default: budget covers on-ground costs, not long-haul transport (common case).
+    budgetIncluded: {
+      stay: true, transport_to: false, local_transport: true,
+      food: true, activities: true, shopping: true, buffer: true,
+    },
+    transport: { mode: 'train' },
+    stay: {},
   }
 }
 
@@ -231,6 +261,16 @@ export default function NewTripAiGeneratorPage() {
     setBrief((p) => ({ ...p, travellerCount: count, composition: { ...p.composition, total: count } }))
   }
 
+  function toggleBudgetCat(key: BudgetCategoryKey) {
+    setBrief((p) => ({ ...p, budgetIncluded: { ...p.budgetIncluded, [key]: !p.budgetIncluded[key] } }))
+  }
+  function setTransport(patch: Partial<PlannedTransport>) {
+    setBrief((p) => ({ ...p, transport: { ...p.transport, ...patch } }))
+  }
+  function setStay(patch: Partial<PlannedStay>) {
+    setBrief((p) => ({ ...p, stay: { ...p.stay, ...patch } }))
+  }
+
   // ── Parse NL prompt → brief ────────────────────────────────────────────
 
   async function handleParsePrompt() {
@@ -304,6 +344,14 @@ export default function NewTripAiGeneratorPage() {
     setBriefErrors({})
 
     const dayCount = getDayCount(brief.startDate, brief.endDate)
+
+    // Feed stay intent to the AI: a known base anchors daily routes; "suggest"
+    // asks the model to recommend a stay area within budget.
+    const stayBase = brief.stayBaseMode === 'known' && brief.stayBase.trim() ? brief.stayBase.trim() : undefined
+    const extraNotes = brief.stayBaseMode === 'suggest'
+      ? [brief.preferences.extraNotes, `Suggest a suitable stay area/neighbourhood in ${brief.destination.trim()} within budget for this group (search queries only — do not claim availability or prices).`].filter(Boolean).join(' ')
+      : brief.preferences.extraNotes
+
     const input: TripGeneratorInput = {
       destination: brief.destination.trim(),
       startDate: brief.startDate,
@@ -314,10 +362,11 @@ export default function NewTripAiGeneratorPage() {
       travellerCount: brief.travellerCount,
       composition: { ...brief.composition, total: brief.travellerCount },
       tripType: brief.tripType,
-      preferences: brief.preferences,
+      preferences: { ...brief.preferences, extraNotes },
       mode: 'fill_empty',
       today,
       existingDays: [],
+      stayBase,
     }
 
     setGenError(null)
@@ -362,6 +411,8 @@ export default function NewTripAiGeneratorPage() {
 
       const days = await getItineraryDays(tripId)
       const dayByDate = new Map(days.map((d) => [d.date, d]))
+      const firstDay = days[0]
+      let verified = 0, unverified = 0
 
       for (const ed of editDays) {
         const day = dayByDate.get(ed.date)
@@ -375,6 +426,7 @@ export default function NewTripAiGeneratorPage() {
             if (a.whyRecommended) noteParts.push(`Why: ${a.whyRecommended}`)
             if (a.routeNotes) noteParts.push(a.routeNotes)
             noteParts.push('(AI Trip Generator)')
+            if (a._placeId) verified++; else unverified++
             return stripUndefined({
               id: `ai-${day.id}-${Math.random().toString(36).slice(2, 9)}`,
               type: categoryToActivityType(a.category),
@@ -389,14 +441,71 @@ export default function NewTripAiGeneratorPage() {
               locationName: a.locationName || undefined,
               confirmed: false,
               bookingStatus: 'planned' as const,
-              suggestedCategorySource: a._enriched ? ('google_place_type' as const) : undefined,
+              // Persist Google place metadata when the place was verified.
+              placeId: a._placeId || undefined,
+              placeName: a._placeId ? (a.locationName || a.title) : undefined,
+              placeAddress: a._placeAddress || undefined,
+              placeRating: a._placeRating,
+              placeUserRatingsTotal: a._placeUserRatings,
+              priceLevel: a._priceLevel,
+              lat: a._lat,
+              lng: a._lng,
+              suggestedCategorySource: a._autoCategory ? ('google_place_type' as const) : undefined,
               updatedAt: new Date().toISOString(),
             }) as Activity
           })
+
+        // On the first day, prepend planned transport + stay as planned estimates
+        // (never actual expenses — these are editable planned activities).
+        if (firstDay && day.id === firstDay.id) {
+          const extras: Activity[] = []
+          const t = brief.transport
+          if (t.totalCost || t.origin || t.destination) {
+            const tParts = [`${t.mode}`, t.origin && t.destination ? `${t.origin} → ${t.destination}` : '', t.bookingRef ? `Ref: ${t.bookingRef}` : '', '(AI Trip Generator · planned transport)'].filter(Boolean)
+            extras.push(stripUndefined({
+              id: `ai-transport-${Math.random().toString(36).slice(2, 9)}`,
+              type: 'transport',
+              category: 'transport',
+              title: `Travel to ${brief.destination.trim()} (${t.mode})`,
+              notes: tParts.join(' · '),
+              time: '',
+              startTime: t.departure || undefined,
+              endTime: t.arrival || undefined,
+              cost: t.totalCost || 0,
+              estimatedCost: t.totalCost || 0,
+              confirmed: false,
+              bookingStatus: 'planned' as const,
+              updatedAt: new Date().toISOString(),
+            }) as Activity)
+          }
+          const s = brief.stay
+          if (s.totalCost || s.name || s.area) {
+            extras.push(stripUndefined({
+              id: `ai-stay-${Math.random().toString(36).slice(2, 9)}`,
+              type: 'hotel',
+              category: 'hotel',
+              title: s.name ? `Stay: ${s.name}` : `Stay in ${s.area || brief.destination.trim()}`,
+              notes: [s.area, s.rooms ? `${s.rooms} room(s)` : '', '(AI Trip Generator · planned stay)'].filter(Boolean).join(' · '),
+              time: '',
+              cost: s.totalCost || 0,
+              estimatedCost: s.totalCost || 0,
+              locationName: s.name || s.area || undefined,
+              confirmed: false,
+              bookingStatus: 'planned' as const,
+              updatedAt: new Date().toISOString(),
+            }) as Activity)
+          }
+          if (extras.length > 0) activities.unshift(...extras)
+        }
+
         if (activities.length > 0) {
           await updateItineraryDay(tripId, day.id, { activities })
         }
       }
+
+      try {
+        sessionStorage.setItem(`voyago:gen-summary:${tripId}`, JSON.stringify({ verified, unverified }))
+      } catch { /* non-critical */ }
       router.push(`/trips/${tripId}/itinerary`)
     } catch (err) {
       console.error('[Phase 15D] createTrip error:', err)
@@ -919,6 +1028,113 @@ export default function NewTripAiGeneratorPage() {
               </div>
             </div>
 
+            {/* ── Stay base ─────────────────────────────────────────────── */}
+            <div className="rounded-2xl border border-gray-100 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Home size={15} className="text-violet-500" />
+                <p className="text-sm font-bold text-gray-800">Where are you staying?</p>
+              </div>
+              <p className="text-xs text-gray-500">Used as the daily route base when planning your itinerary.</p>
+              <div className="space-y-2">
+                {([
+                  { v: 'known' as StayBaseMode, label: 'I know my hotel / stay location' },
+                  { v: 'suggest' as StayBaseMode, label: 'Suggest a good stay area within budget' },
+                  { v: 'later' as StayBaseMode, label: 'I\'ll decide later' },
+                ]).map((o) => (
+                  <button key={o.v} type="button" onClick={() => setBrief((p) => ({ ...p, stayBaseMode: o.v }))}
+                    className={`w-full text-left px-3 py-2.5 rounded-xl border-2 text-sm transition-all ${brief.stayBaseMode === o.v ? 'border-violet-500 bg-violet-50 text-violet-700 font-semibold' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {brief.stayBaseMode === 'known' && (
+                <Input label="Hotel / homestay / area name" placeholder="e.g. Hotel Sonam Delek, MG Marg" value={brief.stayBase} onChange={(e) => setBrief((p) => ({ ...p, stayBase: e.target.value }))} />
+              )}
+              {brief.stayBaseMode === 'suggest' && (
+                <p className="text-xs text-violet-600">AI will suggest a stay area — we don&apos;t guarantee availability or prices.</p>
+              )}
+            </div>
+
+            {/* ── Budget breakdown ──────────────────────────────────────── */}
+            <div className="rounded-2xl border border-gray-100 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Wallet size={15} className="text-violet-500" />
+                <p className="text-sm font-bold text-gray-800">What does your budget include?</p>
+              </div>
+              <p className="text-xs text-gray-500">
+                {brief.budget > 0
+                  ? `Your ${brief.currency} ${brief.budget.toLocaleString()} budget — tick what it covers. Excluded categories aren't compared against it.`
+                  : 'Tick which categories your budget is meant to cover. (No total budget entered yet.)'}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {BUDGET_CATS.map((cat) => {
+                  const on = !!brief.budgetIncluded[cat.key]
+                  return (
+                    <button key={cat.key} type="button" onClick={() => toggleBudgetCat(cat.key)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all ${on ? 'border-violet-400 bg-violet-50 text-violet-700' : 'border-gray-200 bg-white text-gray-400'}`}>
+                      <span className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 ${on ? 'bg-violet-500 text-white' : 'border border-gray-300'}`}>
+                        {on && <Check size={11} />}
+                      </span>
+                      {cat.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* ── Transport & stay estimates (optional) ─────────────────── */}
+            <div className="rounded-2xl border border-gray-100 p-4 space-y-4">
+              <p className="text-sm font-bold text-gray-800">Known bookings (optional)</p>
+              <p className="text-xs text-gray-500 -mt-2">Add transport/stay you&apos;ve already arranged. Saved as planned estimates — never as actual expenses.</p>
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Transport to destination</p>
+                <div className="flex gap-2 flex-wrap">
+                  {TRANSPORT_MODES.map((m) => (
+                    <button key={m} type="button" onClick={() => setTransport({ mode: m })}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all capitalize ${brief.transport.mode === m ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-200 hover:border-violet-300'}`}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="From" placeholder="Origin" value={brief.transport.origin || ''} onChange={(e) => setTransport({ origin: e.target.value })} />
+                  <Input label="To" placeholder="Destination" value={brief.transport.destination || ''} onChange={(e) => setTransport({ destination: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Total cost (optional)" type="number" min="0" placeholder="0" value={brief.transport.totalCost ? String(brief.transport.totalCost) : ''} onChange={(e) => setTransport({ totalCost: parseFloat(e.target.value) || undefined })} />
+                  <Input label="Booking ref (optional)" placeholder="PNR / ref" value={brief.transport.bookingRef || ''} onChange={(e) => setTransport({ bookingRef: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Accommodation</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Hotel / stay name" placeholder="e.g. Hotel Sonam Delek" value={brief.stay.name || ''} onChange={(e) => setStay({ name: e.target.value })} />
+                  <Input label="Area" placeholder="e.g. MG Marg" value={brief.stay.area || ''} onChange={(e) => setStay({ area: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Total stay cost (optional)" type="number" min="0" placeholder="0" value={brief.stay.totalCost ? String(brief.stay.totalCost) : ''} onChange={(e) => setStay({ totalCost: parseFloat(e.target.value) || undefined })} />
+                  <Input label="Rooms (optional)" type="number" min="1" placeholder="1" value={brief.stay.rooms ? String(brief.stay.rooms) : ''} onChange={(e) => setStay({ rooms: parseInt(e.target.value) || undefined })} />
+                </div>
+                {brief.stay.name && brief.stayBaseMode !== 'known' && (
+                  <button type="button" onClick={() => setBrief((p) => ({ ...p, stayBaseMode: 'known', stayBase: p.stay.name || p.stay.area || '' }))}
+                    className="text-[11px] font-semibold text-violet-600 hover:text-violet-700">
+                    Use this stay as the daily route base →
+                  </button>
+                )}
+              </div>
+
+              {/* Ticket upload foundation — Coming Soon */}
+              <div className="flex items-start gap-2 rounded-xl bg-gray-50 border border-gray-100 p-3">
+                <Upload size={14} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-gray-600">Upload tickets &amp; booking PDFs <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500 ml-1">Coming soon</span></p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Attach train/flight/bus tickets &amp; hotel confirmations (kept private to trip members). For now, enter details manually above.</p>
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-start gap-2 rounded-2xl bg-violet-50/70 border border-violet-100 p-3">
               <Sparkles size={14} className="text-violet-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-gray-600 leading-relaxed">
@@ -984,6 +1200,14 @@ export default function NewTripAiGeneratorPage() {
               mapsAvailable={mapsStatus.available}
               applyLabel="Create Trip"
               applyingLabel="Creating trip…"
+              autoEnrich
+              budgetContext={{
+                budget: brief.budget,
+                included: brief.budgetIncluded,
+                plannedTransport: (brief.transport.totalCost || brief.transport.origin || brief.transport.destination) ? [brief.transport] : undefined,
+                plannedStay: (brief.stay.totalCost || brief.stay.name || brief.stay.area) ? brief.stay : undefined,
+                stayBaseLabel: brief.stayBaseMode === 'known' && brief.stayBase.trim() ? brief.stayBase.trim() : undefined,
+              }}
               onApply={handleCreateTrip}
               onDiscard={() => { setStage('review-brief'); setResult(null) }}
               onRegenerate={handleGenerate}

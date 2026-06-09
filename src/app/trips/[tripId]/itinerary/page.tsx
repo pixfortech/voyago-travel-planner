@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { TrendingUp, TrendingDown, X } from 'lucide-react'
+import { TrendingUp, TrendingDown, X, Sparkles } from 'lucide-react'
 import { getTrip, getItineraryDays, getExpenses, getLocationPoints, getMemories, addActivity, deleteActivity, updateActivity } from '@/lib/firestore'
 import { detectVisitedActivities } from '@/lib/location/visited'
 import { formatCurrency } from '@/lib/utils'
@@ -40,7 +40,21 @@ export default function ItineraryPage() {
   const [locationPoints, setLocationPoints] = useState<TripLocationPoint[]>([])
   const [memories, setMemories] = useState<TripMemory[]>([])
 
+  // One-shot summary shown right after the AI Trip Generator creates this trip.
+  const [genSummary, setGenSummary] = useState<{ verified: number; unverified: number } | null>(null)
+
   const { status: mapsStatus } = useMapsStatus()
+
+  useEffect(() => {
+    if (!tripId) return
+    try {
+      const raw = sessionStorage.getItem(`voyago:gen-summary:${tripId}`)
+      if (raw) {
+        setGenSummary(JSON.parse(raw))
+        sessionStorage.removeItem(`voyago:gen-summary:${tripId}`)
+      }
+    } catch { /* ignore */ }
+  }, [tripId])
 
   useEffect(() => {
     if (!tripId) return
@@ -191,6 +205,21 @@ export default function ItineraryPage() {
   return (
     <AppShell title="Itinerary" back={`/trips/${tripId}`} tripId={tripId}>
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
+        {/* AI Trip Generator post-create summary (one-shot) */}
+        {genSummary && (
+          <div className="bg-gradient-to-r from-violet-50 to-fuchsia-50 border border-violet-100 rounded-2xl px-4 py-3 flex items-start gap-2.5">
+            <Sparkles size={16} className="text-violet-500 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-800">Itinerary created with AI</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {genSummary.verified} place{genSummary.verified === 1 ? '' : 's'} verified with Google
+                {genSummary.unverified > 0 ? ` · ${genSummary.unverified} unverified (review & confirm)` : ''}. All costs and timings are estimates — edit anytime.
+              </p>
+            </div>
+            <button onClick={() => setGenSummary(null)} className="text-gray-400 hover:text-gray-600 text-xs flex-shrink-0">✕</button>
+          </div>
+        )}
+
         {/* Budget connection header */}
         {trip && totalEstimated > 0 && trip.budget > 0 && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-5 py-4">

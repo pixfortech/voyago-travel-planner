@@ -20,6 +20,7 @@ import type {
   BookingStatus,
   InsightConfidence,
 } from '@/types'
+import { getCuratedPlaces, genericCandidate, type CuratedPlace } from './curatedPlaces'
 
 export const TRIP_GENERATOR_APPROXIMATE_LABEL =
   'This itinerary is AI-generated and approximate. Costs, timings, opening hours and routes are estimates — verify before booking and edit before applying.'
@@ -34,7 +35,19 @@ const MODE_LABEL: Record<TripGeneratorInput['mode'], string> = {
 export const TRIP_GENERATOR_SYSTEM_PROMPT = `You are Voyago's expert India-first travel itinerary generator.
 You build complete, realistic, day-by-day trip plans tailored to the traveller group.
 
-Hard rules:
+REAL PLACES — THE MOST IMPORTANT RULE:
+- Every sightseeing/spiritual/adventure/leisure/shopping stop MUST be a REAL, named,
+  existing place at or near the destination (e.g. for Gangtok: "Tashi View Point",
+  "Ganesh Tok", "Enchey Monastery", "MG Marg", "Rumtek Monastery", "Tsomgo Lake").
+- NEVER output generic placeholder titles such as "sightseeing highlight 1.1",
+  "Point of interest", "Local attraction", "Day 1 activity" or numbered labels.
+- The "title" must be the actual place name. "suggestedPlaceSearchQuery" must be a
+  precise Google-searchable string like "Tashi View Point, Gangtok".
+- If you are NOT confident a place really exists, set "needsVerification": true and
+  make the title a clear, specific search intent (e.g. "Best momos restaurant near MG Marg")
+  so it can be resolved against Google Places before use. Do this rarely.
+
+Other hard rules:
 - Plan ONLY within the given trip dates. Never invent days outside the range.
 - Respect the traveller composition. If seniors or kids are present, reduce walking,
   add rest breaks, avoid very early starts / very late nights, and keep a gentler pace.
@@ -42,10 +55,10 @@ Hard rules:
 - Respect food preferences strictly (e.g. vegetarian/Jain). Treat allergy/avoid lists as
   constraints but NEVER claim a place is medically safe — add a caveat instead.
 - Keep total estimated cost within the budget when possible; warn clearly if it is tight or over.
-- Order stops to minimise back-and-forth travel within each day.
+- Order stops geographically to minimise back-and-forth travel within each day.
+- If a "stay/base location" is given, START and END each day near that base.
 - Include realistic meal breaks and rest breaks based on the group.
 - Provide a tentative time-to-spend for each stop and brief travel notes between major stops.
-- Give a "suggestedPlaceSearchQuery" for each real place so it can be looked up later.
 - Do NOT claim exact opening hours, exact prices, or specific menu items unless clearly
   labelled as approximate. All numbers are estimates.
 - Costs are in the trip's currency. estimatedCost is the TOTAL for the whole group;
@@ -84,6 +97,7 @@ Today: ${input.today}
 Trip type: ${input.tripType}
 Travellers: ${input.travellerCount} total — ${compositionLine(input)}
 Budget: ${input.currency} ${input.budget > 0 ? input.budget : 'not specified'} (total for the group)
+${input.stayBase ? `Stay / base location (start & end each day near here): ${input.stayBase}` : ''}
 Pace: ${p.pace}
 Interests: ${p.interests.length ? p.interests.join(', ') : 'general sightseeing'}
 Food preferences: ${p.foodPreferences.length ? p.foodPreferences.join(', ') : 'no specific preference'}
@@ -117,17 +131,18 @@ Return a JSON object exactly matching this shape:
       "notes": "optional day note",
       "activities": [
         {
-          "title": "...",
+          "title": "REAL place name (e.g. Tashi View Point)",
           "description": "1 sentence",
           "category": "sightseeing|food|hotel|transport|shopping|adventure|spiritual|leisure|emergency|other",
           "startTime": "HH:MM",
           "endTime": "HH:MM",
           "estimatedCost": 0,
           "estimatedCostPerPerson": 0,
-          "locationName": "...",
-          "suggestedPlaceSearchQuery": "Place name, City",
+          "locationName": "REAL place name",
+          "suggestedPlaceSearchQuery": "Real place name, City",
           "bookingStatus": "planned",
           "priority": "must|recommended|optional",
+          "needsVerification": false,
           "foodInsightNotes": "for food stops only",
           "routeNotes": "travel note to next stop",
           "whyRecommended": "why this fits the group",
@@ -208,6 +223,7 @@ function coerceActivity(raw: unknown): GeneratedActivity {
     whyRecommended: a.whyRecommended ? str(a.whyRecommended) : undefined,
     timeToSpend: a.timeToSpend ? str(a.timeToSpend) : undefined,
     isBreak: Boolean(a.isBreak),
+    needsVerification: a.needsVerification === true ? true : undefined,
   }
 }
 
@@ -322,6 +338,9 @@ export function mockTripGeneratorResult(input: TripGeneratorInput): TripGenerato
   const sightCost = isINR ? 500 : 12
   const mealCost = isINR ? 400 : 10
 
+  // Real curated places for known destinations; otherwise a generic, clearly
+  // unverified pool that the UI must resolve via Google Places before applying.
+  const curated = getCuratedPlaces(input.destination)
   const interestCats: ActivityCategory[] = []
   for (const it of input.preferences.interests) {
     if (it === 'food') interestCats.push('food')
@@ -333,9 +352,15 @@ export function mockTripGeneratorResult(input: TripGeneratorInput): TripGenerato
   }
   if (interestCats.length === 0) interestCats.push('sightseeing')
 
+  // Pool of real places. Must-visits are prepended (treated as real, verified by the user).
+  const mustVisits: CuratedPlace[] = input.preferences.mustVisit.map((m) => ({ name: m, category: 'sightseeing' as ActivityCategory }))
+  const placePool: CuratedPlace[] = [...mustVisits, ...(curated ?? [])]
+  let poolIdx = 0
+  let genericIdx = 0
+  let usedGeneric = false
+
   const dayPlans: GeneratedDay[] = []
   let total = 0
-  let mustIdx = 0
 
   for (let di = 0; di < dates.length; di++) {
     const { date, dayNumber } = dates[di]!
@@ -343,33 +368,51 @@ export function mockTripGeneratorResult(input: TripGeneratorInput): TripGenerato
     let clock = 9 * 60
 
     for (let k = 0; k < perDay; k++) {
-      const cat = interestCats[(di + k) % interestCats.length]!
       const start = `${String(Math.floor(clock / 60)).padStart(2, '0')}:${String(clock % 60).padStart(2, '0')}`
       clock += 120
       const end = `${String(Math.floor(clock / 60)).padStart(2, '0')}:${String(clock % 60).padStart(2, '0')}`
 
-      // Seed a must-visit place into early slots.
-      const must = input.preferences.mustVisit[mustIdx]
-      const title = (k === 0 && must) ? must : `${input.destination} ${cat} highlight ${dayNumber}.${k + 1}`
-      if (k === 0 && must) mustIdx++
+      let title: string
+      let cat: ActivityCategory
+      let query: string
+      let needsVerification: boolean
+
+      const seed = placePool[poolIdx]
+      if (seed) {
+        title = seed.name
+        cat = seed.category
+        query = `${seed.name}, ${input.destination}`
+        needsVerification = false
+        poolIdx++
+      } else {
+        // Out of curated/must-visit places — emit a real-sounding, verifiable
+        // search intent (never a "highlight 1.1" placeholder).
+        const cand = genericCandidate(input.destination, interestCats[(di + k) % interestCats.length]!, genericIdx++)
+        title = cand.title
+        cat = interestCats[(di + k) % interestCats.length]!
+        query = cand.searchQuery
+        needsVerification = true
+        usedGeneric = true
+      }
 
       const cost = cat === 'food' ? mealCost : sightCost
       total += cost
       activities.push({
         title,
-        description: 'Suggested stop based on your interests.',
+        description: needsVerification ? 'AI suggestion — verify with Google Places before applying.' : 'Popular stop matched to your interests.',
         category: cat,
         startTime: start,
         endTime: end,
         estimatedCost: cost,
         estimatedCostPerPerson: input.travellerCount > 0 ? Math.round(cost / input.travellerCount) : cost,
         locationName: title,
-        suggestedPlaceSearchQuery: `${title}, ${input.destination}`,
+        suggestedPlaceSearchQuery: query,
         bookingStatus: 'planned',
         priority: k === 0 ? 'must' : 'recommended',
         whyRecommended: `Fits a ${input.preferences.pace} pace for your group.`,
-        timeToSpend: '1–2 hrs',
+        timeToSpend: seed?.timeToSpend ?? '1–2 hrs',
         routeNotes: 'Short hop to the next stop.',
+        needsVerification: needsVerification || undefined,
       })
 
       if (k === 0) {
@@ -414,13 +457,21 @@ export function mockTripGeneratorResult(input: TripGeneratorInput): TripGenerato
   if (dates.length === 0) {
     warnings.push('No eligible days to plan for the selected mode — all days may be protected or in the past.')
   }
+  if (usedGeneric) {
+    warnings.push('Some stops are AI suggestions that need Google Places verification before applying.')
+  }
+
+  const assumptions = [
+    'Generated locally without a real AI model (development mock).',
+    'Costs and timings are estimates — edit before applying.',
+  ]
+  if (curated) assumptions.push(`Used a curated set of real places for ${input.destination}.`)
 
   return {
-    tripSummary: `[DEV MOCK] A ${input.preferences.pace} ${dates.length}-day plan for ${input.destination} for ${input.travellerCount} traveller(s).`,
-    assumptions: [
-      'Generated locally without a real AI model (development mock).',
-      'Costs and timings are placeholders — edit before applying.',
-    ],
+    tripSummary: curated
+      ? `[DEV MOCK] A ${input.preferences.pace} ${dates.length}-day plan for ${input.destination} built from real, well-known places for ${input.travellerCount} traveller(s).`
+      : `[DEV MOCK] A ${input.preferences.pace} ${dates.length}-day plan for ${input.destination} for ${input.travellerCount} traveller(s) — enrich with Google Places to confirm real venues.`,
+    assumptions,
     dayPlans,
     budgetSummary: {
       totalEstimatedCost: total,

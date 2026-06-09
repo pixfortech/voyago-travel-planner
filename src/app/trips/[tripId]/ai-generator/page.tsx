@@ -183,7 +183,16 @@ export default function AiGeneratorPage() {
           locationName: a.locationName || undefined,
           confirmed: false,
           bookingStatus: 'planned' as const,
-          suggestedCategorySource: a._enriched ? ('google_place_type' as const) : undefined,
+          // Persist Google place metadata when the place was verified.
+          placeId: a._placeId || undefined,
+          placeName: a._placeId ? (a.locationName || a.title) : undefined,
+          placeAddress: a._placeAddress || undefined,
+          placeRating: a._placeRating,
+          placeUserRatingsTotal: a._placeUserRatings,
+          priceLevel: a._priceLevel,
+          lat: a._lat,
+          lng: a._lng,
+          suggestedCategorySource: a._autoCategory ? ('google_place_type' as const) : undefined,
           updatedAt: new Date().toISOString(),
         }) as Activity
       })

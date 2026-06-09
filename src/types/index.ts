@@ -1434,6 +1434,11 @@ export interface TripGeneratorInput {
   mode: GeneratorMode
   today: string                 // YYYY-MM-DD
   existingDays?: GeneratorExistingDay[]
+  /**
+   * Phase 15D — known hotel/homestay/area the group is staying at, used as the
+   * daily route base. Free text (never personal data). Optional.
+   */
+  stayBase?: string
 }
 
 export type ActivityPriority = 'must' | 'recommended' | 'optional'
@@ -1459,6 +1464,11 @@ export interface GeneratedActivity {
   /** Tentative time to spend, e.g. "1–2 hrs". */
   timeToSpend?: string
   isBreak?: boolean
+  /**
+   * Phase 15D — true when the AI could not confidently name a real, existing
+   * place and the candidate must be resolved via Google Places before applying.
+   */
+  needsVerification?: boolean
 }
 
 /** A proposed day in the generated plan. */
@@ -1516,4 +1526,61 @@ export interface TripGeneratorResponse {
   isMock: boolean
   provider: 'anthropic' | 'mock'
   model: string
+}
+
+// ── Phase 15D — New-Trip AI Draft Generator: budget split, stay base,
+// planned transport / accommodation entries, ticket-upload foundation. ───────
+
+/** Budget categories the user can mark as included in / excluded from the trip budget. */
+export type BudgetCategoryKey =
+  | 'stay'             // hotel / homestay / Airbnb
+  | 'transport_to'     // train / flight / bus / car to the destination
+  | 'local_transport'  // taxis / cabs / local travel
+  | 'food'
+  | 'activities'       // tickets / entry fees
+  | 'shopping'
+  | 'buffer'           // emergency buffer
+
+/** Which budget categories the entered total budget is meant to cover. */
+export type BudgetInclusion = Partial<Record<BudgetCategoryKey, boolean>>
+
+/** Where the group is staying — drives daily route base + budget. */
+export type StayBaseMode = 'known' | 'suggest' | 'later'
+
+/** Optional planned long-haul transport to/from the destination (estimate, not an expense). */
+export interface PlannedTransport {
+  mode: 'train' | 'flight' | 'bus' | 'car' | 'other'
+  origin?: string
+  destination?: string
+  departure?: string        // ISO date-time or free text
+  arrival?: string
+  totalCost?: number
+  perPersonCost?: number
+  bookingRef?: string
+}
+
+/** Optional planned accommodation (estimate, not an expense). Doubles as route base. */
+export interface PlannedStay {
+  name?: string
+  area?: string
+  checkIn?: string
+  checkOut?: string
+  totalCost?: number
+  perNightCost?: number
+  rooms?: number
+  /** Resolved coordinates when the stay area/name was matched via Google Places. */
+  lat?: number
+  lng?: number
+  placeId?: string
+}
+
+/** Compact per-day road-route summary shown in the generated preview. */
+export interface GeneratedDayRoute {
+  /** Number of geocoded stops used for the route. */
+  stops: number
+  distanceKm: number
+  durationText: string
+  method: 'road' | 'haversine'
+  /** True when the day's activities changed after this route was computed. */
+  stale?: boolean
 }
