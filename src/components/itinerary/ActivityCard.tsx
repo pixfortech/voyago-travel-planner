@@ -1,6 +1,6 @@
 'use client'
 
-import { Trash2, CheckCircle, Circle, Pencil, Star } from 'lucide-react'
+import { Trash2, CheckCircle, Circle, Pencil, Star, MessageSquare } from 'lucide-react'
 import { activityTypeIcon, activityCategoryIcon, formatCurrency } from '@/lib/utils'
 import { priceLevelSymbol, formatRating } from '@/lib/maps/config'
 import type { Activity, BookingStatus } from '@/types'
@@ -20,6 +20,7 @@ interface ActivityCardProps {
   onEdit: () => void
   onDelete: () => void
   onToggleConfirm: (confirmed: boolean) => void
+  onCommentsClick?: () => void
 }
 
 export default function ActivityCard({
@@ -29,6 +30,7 @@ export default function ActivityCard({
   onEdit,
   onDelete,
   onToggleConfirm,
+  onCommentsClick,
 }: ActivityCardProps) {
   const isCompleted =
     activity.bookingStatus === 'completed' || (!activity.bookingStatus && activity.confirmed)
@@ -131,6 +133,16 @@ export default function ActivityCard({
 
         {/* Actions */}
         <div className="flex items-center gap-1 flex-shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+          {onCommentsClick && (
+            <button
+              onClick={onCommentsClick}
+              className="p-1.5 rounded-lg text-gray-300 hover:text-primary-500 hover:bg-primary-50 transition-all"
+              aria-label="Discussion"
+              title="Comments & reactions"
+            >
+              <MessageSquare size={13} />
+            </button>
+          )}
           <button
             onClick={onEdit}
             className="p-1.5 rounded-lg text-gray-300 hover:text-primary-500 hover:bg-primary-50 transition-all"

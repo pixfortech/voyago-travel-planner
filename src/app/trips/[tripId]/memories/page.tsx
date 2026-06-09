@@ -18,6 +18,8 @@ import {
 import { getCurrentPosition, GeoError } from '@/lib/location/geo'
 import { generateId } from '@/lib/utils'
 import AppShell from '@/components/layout/AppShell'
+import CommentsPanel from '@/components/comments/CommentsPanel'
+import ReactionBar from '@/components/comments/ReactionBar'
 import type {
   Trip, ItineraryDay, Activity, TripLocationPoint, TripMemory, Traveller, MemoryLocation, LocationSource,
 } from '@/types'
@@ -623,7 +625,7 @@ export default function MemoriesPage() {
                   <X size={18} />
                 </button>
               </div>
-              <div className="p-4 space-y-2 overflow-y-auto">
+              <div className="p-4 space-y-3 overflow-y-auto flex-1">
                 {lightbox.title && <p className="font-bold text-gray-900">{lightbox.title}</p>}
                 {lightbox.description && <p className="text-sm text-gray-600">{lightbox.description}</p>}
                 <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
@@ -651,9 +653,36 @@ export default function MemoriesPage() {
                     })}
                   </div>
                 )}
+
+                {/* Reactions */}
+                {trip && user && !user.isAnonymous && (
+                  <ReactionBar
+                    tripId={tripId}
+                    targetType="memory"
+                    targetId={lightbox.id}
+                    currentUid={user.uid}
+                  />
+                )}
+
+                {/* Comments */}
+                {trip && user && !user.isAnonymous && (
+                  <div className="border-t border-gray-100 pt-3">
+                    <p className="text-xs font-black text-gray-400 uppercase tracking-wide mb-2">Discussion</p>
+                    <CommentsPanel
+                      tripId={tripId}
+                      targetType="memory"
+                      targetId={lightbox.id}
+                      trip={trip}
+                      currentUid={user.uid}
+                      authorName={profile?.name ?? user.displayName ?? 'Member'}
+                      compact
+                    />
+                  </div>
+                )}
+
                 <button
                   onClick={() => handleDelete(lightbox)} disabled={deletingId === lightbox.id}
-                  className="w-full flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-xl px-4 py-2 transition-colors mt-2"
+                  className="w-full flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-xl px-4 py-2 transition-colors"
                 >
                   {deletingId === lightbox.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                   Delete memory

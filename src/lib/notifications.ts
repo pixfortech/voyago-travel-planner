@@ -19,7 +19,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import type { InAppNotification, Trip, TripMemory } from '@/types'
+import type { InAppNotification, Trip, TripMemory, TripComment, Traveller } from '@/types'
 
 /**
  * Create tag notifications for all tagged travellers that have a linked user account.
@@ -79,6 +79,76 @@ export async function createTagNotifications(params: {
   )
 
   return { notifiedCount }
+}
+
+/**
+ * Create in-app mention notifications for trip members @mentioned in a comment.
+ * Detects @FirstName patterns in the comment body, matches against travellers with
+ * a linked userId, skips the comment author, and deduplicates by commentId.
+ */
+export async function createMentionNotifications(params: {
+  comment: TripComment
+  trip: Trip
+  travellers: Traveller[]
+  authorName: string
+}): Promise<void> {
+  const { comment, trip, travellers, authorName } = params
+
+  // Extract @mentions (first word after @)
+  const mentionPattern = /@(\w+)/g
+  const mentioned = new Set<string>()
+  let m
+  while ((m = mentionPattern.exec(comment.body)) !== null) {
+    mentioned.add(m[1].toLowerCase())
+  }
+  if (mentioned.size === 0) return
+
+  const now = new Date().toISOString()
+
+  await Promise.all(
+    travellers.map(async (traveller) => {
+      if (!traveller.userId) return
+      if (traveller.userId === comment.authorUid) return
+
+      // Match traveller's first name (case-insensitive) against mentioned tokens
+      const firstName = traveller.name.split(' ')[0].toLowerCase()
+      const matched = Array.from(mentioned).some(
+        (tok) => firstName.startsWith(tok) || tok.startsWith(firstName)
+      )
+      if (!matched) return
+
+      // Duplicate guard
+      const existing = await getDocs(
+        query(
+          collection(db, 'users', traveller.userId, 'notifications'),
+          where('commentId', '==', comment.id),
+          where('type', '==', 'comment_mention'),
+        )
+      )
+      if (!existing.empty) return
+
+      const notification: Omit<InAppNotification, 'id'> = {
+        userId: traveller.userId,
+        tripId: trip.id,
+        commentId: comment.id,
+        targetType: comment.targetType,
+        targetId: comment.targetId,
+        type: 'comment_mention',
+        title: 'You were mentioned in a comment',
+        message: `${authorName} mentioned you in ${trip.name}`,
+        read: false,
+        createdAt: now,
+        actorUid: comment.authorUid,
+        actorName: authorName,
+        tripName: trip.name,
+      }
+
+      await addDoc(
+        collection(db, 'users', traveller.userId, 'notifications'),
+        notification
+      )
+    })
+  )
 }
 
 /** Fetch all notifications for a user, newest first. Returns [] on error. */

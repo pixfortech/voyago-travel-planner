@@ -14,6 +14,7 @@ interface DaySectionProps {
   onEditActivity: (dayId: string, activity: Activity) => void
   onDeleteActivity: (dayId: string, activityId: string) => void
   onToggleConfirm: (dayId: string, activityId: string, confirmed: boolean) => void
+  onCommentsClick?: (activityId: string, activityTitle: string) => void
 }
 
 function detectConflicts(activities: Activity[]): Set<string> {
@@ -41,6 +42,7 @@ export default function DaySection({
   onEditActivity,
   onDeleteActivity,
   onToggleConfirm,
+  onCommentsClick,
 }: DaySectionProps) {
   const [expanded, setExpanded] = useState(true)
 
@@ -145,6 +147,11 @@ export default function DaySection({
                                 onToggleConfirm={(confirmed) =>
                                   onToggleConfirm(day.id, activity.id, confirmed)
                                 }
+                                onCommentsClick={
+                                  onCommentsClick
+                                    ? () => onCommentsClick(activity.id, activity.title)
+                                    : undefined
+                                }
                               />
                             </div>
                           </div>
@@ -174,6 +181,11 @@ export default function DaySection({
                             onDelete={() => onDeleteActivity(day.id, activity.id)}
                             onToggleConfirm={(confirmed) =>
                               onToggleConfirm(day.id, activity.id, confirmed)
+                            }
+                            onCommentsClick={
+                              onCommentsClick
+                                ? () => onCommentsClick(activity.id, activity.title)
+                                : undefined
                             }
                           />
                         ))}

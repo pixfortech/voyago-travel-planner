@@ -2,15 +2,18 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { TrendingUp, TrendingDown } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { TrendingUp, TrendingDown, X } from 'lucide-react'
 import { getTrip, getItineraryDays, getExpenses, addActivity, deleteActivity, updateActivity } from '@/lib/firestore'
 import { formatCurrency } from '@/lib/utils'
+import { useApp } from '@/context/AppContext'
 import AppShell from '@/components/layout/AppShell'
 import DaySection from '@/components/itinerary/DaySection'
 import AddActivityModal from '@/components/itinerary/AddActivityModal'
 import BudgetCoachCard from '@/components/ai/BudgetCoachCard'
 import RoutePlanningSection from '@/components/maps/RoutePlanningSection'
+import CommentsPanel from '@/components/comments/CommentsPanel'
+import ReactionBar from '@/components/comments/ReactionBar'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import type {
   Trip, ItineraryDay, Activity, Expense, BudgetCoachRouteSummary,
@@ -19,6 +22,7 @@ import type {
 export default function ItineraryPage() {
   const { tripId } = useParams<{ tripId: string }>()
   const router = useRouter()
+  const { user, profile } = useApp()
   const [trip, setTrip] = useState<Trip | null>(null)
   const [days, setDays] = useState<ItineraryDay[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -27,6 +31,7 @@ export default function ItineraryPage() {
   const [addingDayId, setAddingDayId] = useState<string | null>(null)
   const [editingActivity, setEditingActivity] = useState<{ dayId: string; activity: Activity } | null>(null)
   const [routeSummary, setRouteSummary] = useState<BudgetCoachRouteSummary | undefined>(undefined)
+  const [commentTarget, setCommentTarget] = useState<{ activityId: string; activityTitle: string } | null>(null)
 
   const { status: mapsStatus } = useMapsStatus()
 
@@ -206,6 +211,9 @@ export default function ItineraryPage() {
               onEditActivity={handleEditActivityClick}
               onDeleteActivity={handleDeleteActivity}
               onToggleConfirm={handleToggleConfirm}
+              onCommentsClick={(activityId, activityTitle) =>
+                setCommentTarget({ activityId, activityTitle })
+              }
             />
           ))
         )}
@@ -242,6 +250,69 @@ export default function ItineraryPage() {
         editActivity={editingActivity?.activity}
         existingActivities={modalDayActivities}
       />
+
+      {/* ── Activity comments & reactions drawer ── */}
+      <AnimatePresence>
+        {commentTarget && trip && user && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex justify-end"
+            onClick={() => setCommentTarget(null)}
+          >
+            {/* Backdrop */}
+            <div className="flex-1 bg-black/40" />
+
+            {/* Panel */}
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              className="w-full max-w-sm bg-white flex flex-col h-full shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-wide">Discussion</p>
+                  <p className="text-sm font-bold text-gray-900 truncate">{commentTarget.activityTitle}</p>
+                </div>
+                <button
+                  onClick={() => setCommentTarget(null)}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors flex-shrink-0"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Reactions */}
+              <div className="px-4 py-3 border-b border-gray-50 flex-shrink-0">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2">React</p>
+                <ReactionBar
+                  tripId={tripId}
+                  targetType="activity"
+                  targetId={commentTarget.activityId}
+                  currentUid={user.uid}
+                />
+              </div>
+
+              {/* Comments — scrollable */}
+              <div className="flex-1 overflow-y-auto px-4 py-3">
+                <CommentsPanel
+                  tripId={tripId}
+                  targetType="activity"
+                  targetId={commentTarget.activityId}
+                  trip={trip}
+                  currentUid={user.uid}
+                  authorName={profile?.name ?? user.displayName ?? 'Member'}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </AppShell>
   )
 }

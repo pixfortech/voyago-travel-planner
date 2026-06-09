@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, BellOff, Camera, Check } from 'lucide-react'
+import { Bell, BellOff, Camera, MessageSquare, Check } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import {
   getNotifications,
@@ -10,6 +10,15 @@ import {
   markAllNotificationsRead,
 } from '@/lib/notifications'
 import type { InAppNotification } from '@/types'
+
+function notificationLink(n: InAppNotification): string {
+  if (n.type === 'memory_tagged' || n.targetType === 'memory') {
+    return `/trips/${n.tripId}/memories`
+  }
+  if (n.targetType === 'activity') return `/trips/${n.tripId}/itinerary`
+  if (n.targetType === 'expense') return `/trips/${n.tripId}/budget`
+  return `/trips/${n.tripId}`
+}
 
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', {
@@ -69,7 +78,7 @@ export default function NotificationBell() {
     }
     setOpen(false)
     if (n.tripId) {
-      router.push(`/trips/${n.tripId}/memories`)
+      router.push(notificationLink(n))
     }
   }
 
@@ -131,8 +140,11 @@ export default function NotificationBell() {
                     !n.read ? 'bg-blue-50/40' : ''
                   }`}
                 >
-                  <div className="w-7 h-7 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Camera size={12} className="text-rose-500" />
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${n.type === 'comment_mention' ? 'bg-primary-50' : 'bg-rose-100'}`}>
+                    {n.type === 'comment_mention'
+                      ? <MessageSquare size={12} className="text-primary-600" />
+                      : <Camera size={12} className="text-rose-500" />
+                    }
                   </div>
                   <div className="flex-1 min-w-0">
                     <p

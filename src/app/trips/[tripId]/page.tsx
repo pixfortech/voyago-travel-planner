@@ -6,9 +6,10 @@ import { motion } from 'framer-motion'
 import {
   MapPin, Calendar, Users, Wallet, Map, Pencil, Trash2, Share2,
   Sparkles, Camera, Lock, Plus, ChevronRight, CheckCircle2, Circle,
-  TrendingUp, UserPlus, Navigation, Play, FileText,
+  TrendingUp, UserPlus, Navigation, Play, FileText, MessageSquare,
 } from 'lucide-react'
 import { getTrip, deleteTrip, getExpenses, getMemories } from '@/lib/firestore'
+import { getRecentTripComments } from '@/lib/comments'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import AppShell from '@/components/layout/AppShell'
 import Badge from '@/components/ui/Badge'
@@ -19,7 +20,7 @@ import {
 import {
   getTotalSpent, getBudgetUsagePercent, getPerHeadBudget, getPerHeadActualCost,
 } from '@/lib/calculations'
-import type { Trip, Expense, TripMemory } from '@/types'
+import type { Trip, Expense, TripMemory, TripComment } from '@/types'
 import Link from 'next/link'
 
 const fadeUp = (delay = 0) => ({
@@ -34,6 +35,7 @@ export default function TripOverviewPage() {
   const [trip, setTrip] = useState<Trip | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [memories, setMemories] = useState<TripMemory[]>([])
+  const [recentComments, setRecentComments] = useState<TripComment[]>([])
   const [loading, setLoading] = useState(true)
   const { status: mapsStatus } = useMapsStatus()
 
@@ -45,6 +47,8 @@ export default function TripOverviewPage() {
       setExpenses(e)
       setMemories(m)
       setLoading(false)
+      // Load recent comments best-effort (don't block page render)
+      getRecentTripComments(tripId, 3).then(setRecentComments).catch(() => {})
     })
   }, [tripId, router])
 
@@ -688,6 +692,46 @@ export default function TripOverviewPage() {
           </motion.div>
 
         </div>
+
+        {/* Recent Discussion */}
+        {recentComments.length > 0 && (
+          <motion.div {...fadeUp(0.18)}>
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <MessageSquare size={12} /> Recent Discussion
+                </p>
+                <Link
+                  href={`/trips/${tripId}/itinerary`}
+                  className="text-[11px] font-semibold text-primary-600 hover:text-primary-700 transition-colors"
+                >
+                  Open →
+                </Link>
+              </div>
+              <div className="space-y-2.5">
+                {recentComments.map((c) => (
+                  <div key={c.id} className="flex items-start gap-2">
+                    <div
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[8px] font-black flex-shrink-0 mt-0.5"
+                      style={{ backgroundColor: c.authorColor }}
+                    >
+                      {c.authorName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-gray-700 truncate">{c.authorName}</p>
+                      {c.deleted ? (
+                        <p className="text-[11px] text-gray-400 italic">deleted</p>
+                      ) : (
+                        <p className="text-[11px] text-gray-500 truncate">{c.body}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
       </div>
     </AppShell>
   )

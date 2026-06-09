@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { Plus } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Plus, X } from 'lucide-react'
 import {
   getTrip,
   getExpenses,
@@ -12,23 +12,27 @@ import {
   deleteExpense,
   updateExpense,
 } from '@/lib/firestore'
+import { useApp } from '@/context/AppContext'
 import AppShell from '@/components/layout/AppShell'
 import BudgetOverview from '@/components/budget/BudgetOverview'
 import TravellerLedger from '@/components/budget/TravellerLedger'
 import ExpenseCard from '@/components/budget/ExpenseCard'
 import AddExpenseModal from '@/components/budget/AddExpenseModal'
 import BudgetCoachCard from '@/components/ai/BudgetCoachCard'
+import CommentsPanel from '@/components/comments/CommentsPanel'
 import Button from '@/components/ui/Button'
 import type { Trip, Expense, ItineraryDay } from '@/types'
 
 export default function BudgetPage() {
   const { tripId } = useParams<{ tripId: string }>()
   const router = useRouter()
+  const { user, profile } = useApp()
   const [trip, setTrip] = useState<Trip | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [days, setDays] = useState<ItineraryDay[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
+  const [commentTarget, setCommentTarget] = useState<{ expenseId: string; expenseTitle: string } | null>(null)
 
   useEffect(() => {
     if (!tripId) return
@@ -146,6 +150,11 @@ export default function BudgetPage() {
                 currency={trip.currency}
                 onToggleReceived={handleToggleReceived}
                 onDelete={handleDelete}
+                onCommentsClick={
+                  user && !user.isAnonymous
+                    ? (id, title) => setCommentTarget({ expenseId: id, expenseTitle: title })
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -183,6 +192,52 @@ export default function BudgetPage() {
         onClose={() => setModalOpen(false)}
         onAdd={handleAddExpense}
       />
+
+      {/* ── Expense discussion drawer ── */}
+      <AnimatePresence>
+        {commentTarget && user && !user.isAnonymous && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex justify-end"
+            onClick={() => setCommentTarget(null)}
+          >
+            <div className="flex-1 bg-black/40" />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              className="w-full max-w-sm bg-white flex flex-col h-full shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-wide">Discussion</p>
+                  <p className="text-sm font-bold text-gray-900 truncate">{commentTarget.expenseTitle}</p>
+                </div>
+                <button
+                  onClick={() => setCommentTarget(null)}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-3">
+                <CommentsPanel
+                  tripId={tripId}
+                  targetType="expense"
+                  targetId={commentTarget.expenseId}
+                  trip={trip}
+                  currentUid={user.uid}
+                  authorName={profile?.name ?? user.displayName ?? 'Member'}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </AppShell>
   )
 }

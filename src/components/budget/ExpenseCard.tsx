@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, Trash2, MapPin, Check, Package } from 'lucide-react'
+import { ChevronDown, Trash2, MapPin, Check, Package, MessageSquare } from 'lucide-react'
 import {
   formatCurrency,
   formatCurrencyPrecise,
@@ -23,6 +23,7 @@ interface ExpenseCardProps {
   currency: string
   onToggleReceived: (expense: Expense, travellerId: string) => void
   onDelete: (expenseId: string) => void
+  onCommentsClick?: (expenseId: string, expenseTitle: string) => void
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -66,6 +67,7 @@ export default function ExpenseCard({
   currency,
   onToggleReceived,
   onDelete,
+  onCommentsClick,
 }: ExpenseCardProps) {
   const [open, setOpen] = useState(false)
 
@@ -246,11 +248,20 @@ export default function ExpenseCard({
           )}
 
           {/* Action area */}
-          <div className="mt-3 flex justify-end">
+          <div className="mt-3 flex items-center justify-between gap-2">
+            {onCommentsClick && (
+              <button
+                type="button"
+                onClick={() => onCommentsClick(expense.id, expense.title)}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-primary-600 hover:bg-primary-50 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <MessageSquare size={13} /> Discussion
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onDelete(expense.id)}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors ml-auto"
             >
               <Trash2 size={13} /> Delete
             </button>

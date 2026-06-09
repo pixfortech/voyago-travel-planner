@@ -674,13 +674,18 @@ export interface OptimiseRoutePoint {
 // Trip members may create notifications for other members via the tag flow.
 // No push notifications or email in this phase — in-app bell only.
 
-export type NotificationType = 'memory_tagged'
+export type NotificationType = 'memory_tagged' | 'comment_mention'
 
 export interface InAppNotification {
   id: string
   userId: string        // recipient uid — matches the Firestore subcollection path
   tripId: string
   memoryId?: string
+  /** Phase 11: comment that triggered this mention notification */
+  commentId?: string
+  /** Phase 11: where the comment lives — used to route the notification tap */
+  targetType?: CommentTargetType
+  targetId?: string
   type: NotificationType
   title: string
   message: string
@@ -689,6 +694,48 @@ export interface InAppNotification {
   actorUid?: string     // who triggered the notification (uploader uid)
   actorName?: string    // uploader display name (denormalised)
   tripName?: string     // trip name (denormalised for display without extra fetch)
+}
+
+// ── Comments & Reactions (Phase 11) ──────────────────────────────────────────
+//
+// Comments are stored as trips/{tripId}/comments/{commentId}.
+// Reactions are stored as trips/{tripId}/reactions/{reactionId}.
+// Both inherit trip membership via the existing wildcard rule:
+//   match /{sub=**} { allow read, write: if isTripMember(tripId); }
+// Comments and reactions are NEVER exposed on public share pages.
+
+/** Which item type a comment or reaction is attached to. */
+export type CommentTargetType = 'trip' | 'activity' | 'memory' | 'expense' | 'route'
+
+/** A discussion comment left by a trip member on an activity, memory, expense, or the trip itself. */
+export interface TripComment {
+  id: string
+  tripId: string
+  targetType: CommentTargetType
+  targetId: string
+  authorUid: string
+  authorName: string
+  /** Colour resolved from the author's traveller entry (or a palette fallback). */
+  authorColor: string
+  body: string
+  /** UIDs of members mentioned with @name in this comment body. */
+  mentions: string[]
+  createdAt: string     // ISO
+  updatedAt?: string    // ISO — set on edit
+  edited?: boolean
+  deleted?: boolean     // soft-delete: body is cleared but document is kept
+}
+
+/** A quick emoji reaction from a trip member on any commentable target. */
+export interface TripReaction {
+  id: string
+  tripId: string
+  targetType: CommentTargetType
+  targetId: string
+  userId: string
+  /** One of the six supported emoji: 👍 ❤️ 😂 😮 ✅ ❓ */
+  emoji: string
+  createdAt: string     // ISO
 }
 
 /** Result returned by POST /api/maps/route/optimise. */
