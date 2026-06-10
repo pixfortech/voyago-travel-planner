@@ -297,12 +297,22 @@ export function parseTripGeneratorResult(
       confidence,
       approximateLabel: TRIP_GENERATOR_APPROXIMATE_LABEL,
     }
-  } catch {
-    return mockTripGeneratorResult(input)
+  } catch (err) {
+    // Never fall back to mock data here — that would silently inject [DEV MOCK]
+    // content into a real-AI response path and mislead the user. Throw so the
+    // route handler can return a clear error and log the raw response for diagnosis.
+    const reason = err instanceof Error ? err.message : String(err)
+    console.error('[Voyago AI] parseTripGeneratorResult: failed to extract JSON from Claude response', {
+      reason,
+      responseLength: text.length,
+      // First 300 chars without newlines — enough to diagnose truncation/fencing.
+      responsePreview: text.slice(0, 300).replace(/\n/g, ' '),
+    })
+    throw new Error(`trip_parse_failed:${reason}`)
   }
 }
 
-// ── Deterministic mock (no Anthropic key) ─────────────────────────────────────
+// ── Deterministic dev mock (AI_PROVIDER=mock only) ────────────────────────────
 
 /** Dates the mock should plan, honouring the mode + existing-day protections. */
 function targetDates(input: TripGeneratorInput): { date: string; dayNumber: number }[] {
@@ -461,16 +471,18 @@ export function mockTripGeneratorResult(input: TripGeneratorInput): TripGenerato
     warnings.push('Some stops are AI suggestions that need Google Places verification before applying.')
   }
 
+  // isMock=true (set by the route) is what the UI uses to show the "Development Mock" badge.
+  // These content strings must not say "[DEV MOCK]" — that text shows as raw UI content.
   const assumptions = [
-    'Generated locally without a real AI model (development mock).',
     'Costs and timings are estimates — edit before applying.',
   ]
-  if (curated) assumptions.push(`Used a curated set of real places for ${input.destination}.`)
+  if (curated) assumptions.push(`Place suggestions drawn from a curated set for ${input.destination}.`)
+  if (usedGeneric) assumptions.push('Some stops are generic suggestions that need verification.')
 
   return {
     tripSummary: curated
-      ? `[DEV MOCK] A ${input.preferences.pace} ${dates.length}-day plan for ${input.destination} built from real, well-known places for ${input.travellerCount} traveller(s).`
-      : `[DEV MOCK] A ${input.preferences.pace} ${dates.length}-day plan for ${input.destination} for ${input.travellerCount} traveller(s) — enrich with Google Places to confirm real venues.`,
+      ? `A ${input.preferences.pace} ${dates.length}-day plan for ${input.destination} built from well-known local places for ${input.travellerCount} traveller(s).`
+      : `A ${input.preferences.pace} ${dates.length}-day plan for ${input.destination} for ${input.travellerCount} traveller(s) — verify locations with Google Places before applying.`,
     assumptions,
     dayPlans,
     budgetSummary: {
@@ -485,10 +497,10 @@ export function mockTripGeneratorResult(input: TripGeneratorInput): TripGenerato
       elderlyFriendly: !!input.composition.seniors === false || input.preferences.pace !== 'packed',
       kidFriendly: !!input.composition.kids === false || input.preferences.pace !== 'packed',
       paceRisk: input.preferences.pace === 'packed' ? 'high' : input.preferences.pace === 'balanced' ? 'medium' : 'low',
-      notes: ['Mock comfort estimate — review before relying on it.'],
+      notes: ['Comfort estimates are approximate — review for your group before applying.'],
     },
     routeSummary: {
-      logic: 'Mock ordering follows the day sequence; enrich + optimise for real road order.',
+      logic: 'Stops are ordered day by day; use "Optimise routes" for road-efficient order.',
       backtrackingRisk: 'low',
       notes: [],
     },

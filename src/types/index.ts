@@ -1526,6 +1526,8 @@ export interface TripGeneratorResponse {
   isMock: boolean
   provider: 'anthropic' | 'mock'
   model: string
+  /** Which path produced the result: real AI, explicit dev mock, or unavailable. */
+  generationSource?: 'anthropic' | 'dev_mock' | 'unavailable'
 }
 
 // ── Phase 15D — New-Trip AI Draft Generator: budget split, stay base,

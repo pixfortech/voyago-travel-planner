@@ -1,12 +1,16 @@
 /**
- * AI Trip Generator — POST /api/ai/trip-generator (Phase 15C).
+ * AI Trip Generator — POST /api/ai/trip-generator (Phase 15C / updated 16A).
  *
  * Accepts a privacy-safe TripGeneratorInput and returns a structured
  * TripGeneratorResult preview. The caller MUST let the user confirm before any
  * Firestore mutation — this endpoint never writes trip data.
  *
- * Falls back to a deterministic, clearly-labelled mock when ANTHROPIC_API_KEY
- * is absent. Uses the 'generation' tier (highest quality) for real generation.
+ * generationSource in the response: 'anthropic' | 'dev_mock' | 'unavailable'
+ *
+ * Dev mock is ONLY returned when AI_PROVIDER=mock is explicitly set.
+ * In all other error cases (no key, parse failure, API error) the route
+ * returns a 502 with a clear error message — it never silently falls back
+ * to mock data in production.
  */
 
 import { NextResponse } from 'next/server'
@@ -79,35 +83,60 @@ export async function POST(request: Request) {
   }
 
   if (provider.isMock) {
-    // Mock is only allowed when AI_PROVIDER=mock or in non-production auto mode.
-    // In production this path is never reached (resolveAiProvider throws instead).
+    // Only reached when AI_PROVIDER=mock is explicitly set (local dev opt-in).
+    // resolveAiProvider() throws in production if no key is configured, so this
+    // path is unreachable in production.
     const payload: TripGeneratorResponse = {
       result: mockTripGeneratorResult(input),
       isMock: true,
       provider: 'mock',
       model: AI_MODELS.generation,
+      generationSource: 'dev_mock',
     }
     return NextResponse.json(payload)
   }
 
+  // ── Real Anthropic path ───────────────────────────────────────────────────
+
+  // Step 1: call the model. Separated from parse so failures are logged distinctly.
+  // maxTokens is set high enough to prevent JSON truncation even with adaptive thinking.
+  // Opus 4.8 with adaptive thinking uses some tokens for reasoning; 8000 leaves
+  // plenty for a 5–7 day itinerary at 4–5 activities/day.
+  let completion: Awaited<ReturnType<typeof provider.complete>>
   try {
-    const completion = await provider.complete({
+    completion = await provider.complete({
       tier: 'generation',
       system: TRIP_GENERATOR_SYSTEM_PROMPT,
-      maxTokens: 4500,
+      maxTokens: 8000,
       messages: [{ role: 'user', content: buildTripGeneratorUserMessage(input) }],
     })
+  } catch (err) {
+    console.error('[Voyago AI] trip-generator: Claude API call failed:', err instanceof Error ? err.message : err)
+    return NextResponse.json(
+      { error: 'ai_unavailable', generationSource: 'unavailable', message: 'AI itinerary generation is currently unavailable. Please retry.' },
+      { status: 502 },
+    )
+  }
+
+  // Step 2: parse the structured JSON from Claude's response.
+  // parseTripGeneratorResult now throws instead of silently falling back to mock,
+  // so a parse failure surfaces as an error rather than injecting mock content.
+  try {
+    const result = parseTripGeneratorResult(completion.text, input)
     const payload: TripGeneratorResponse = {
-      result: parseTripGeneratorResult(completion.text, input),
+      result,
       isMock: completion.isMock,
       provider: completion.provider,
       model: completion.model,
+      generationSource: 'anthropic',
     }
     return NextResponse.json(payload)
   } catch (err) {
-    console.error('[Voyago AI] trip-generator: Anthropic call failed:', err instanceof Error ? err.message : err)
+    // parseTripGeneratorResult already logged the response preview — just record
+    // the route-level failure here for correlation in Cloud Run logs.
+    console.error('[Voyago AI] trip-generator: response parse failed:', err instanceof Error ? err.message : err)
     return NextResponse.json(
-      { error: 'ai_unavailable', message: 'The AI provider could not be reached. Please try again.' },
+      { error: 'ai_parse_failed', generationSource: 'unavailable', message: 'AI itinerary generation is currently unavailable. Please retry.' },
       { status: 502 },
     )
   }
