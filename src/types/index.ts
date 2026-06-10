@@ -160,6 +160,8 @@ export interface Activity {
   routeMode?: string
   routeSource?: 'google_routes' | 'estimate' | 'unavailable'
   routeConfidence?: 'high' | 'medium' | 'low'
+  // Phase 16F — location context (elevation / weather / AQI / time zone). Optional.
+  activityContext?: ActivityContext
 }
 
 export interface ItineraryDay {
@@ -168,6 +170,8 @@ export interface ItineraryDay {
   date: string
   dayNumber: number
   activities: Activity[]
+  // Phase 16F — day-level "what to carry" suggestions derived from context. Optional.
+  essentialSuggestions?: EssentialSuggestion[]
 }
 
 export type ExpenseCategory =
@@ -1470,6 +1474,79 @@ export interface TripGeneratorInput {
 
 export type ActivityPriority = 'must' | 'recommended' | 'optional'
 
+// ── Phase 16F — location context enrichment (elevation / weather / AQI / time zone) ──
+
+/** Weather context for a place at a planned date/time. All numbers optional. */
+export interface WeatherSnapshot {
+  temperatureC?: number
+  feelsLikeC?: number
+  condition?: string
+  precipitationProbability?: number
+  humidity?: number
+  windKph?: number
+  source: 'google_weather' | 'unavailable'
+  /** high = exact forecast day matched; low = closest available day used. */
+  confidence: 'high' | 'low' | 'unavailable'
+  /** The date/time the snapshot was fetched for (ISO date or date-time). */
+  fetchedForDateTime?: string
+}
+
+/** Air-quality context for a place. */
+export interface AqiSnapshot {
+  aqi?: number
+  category?: string
+  dominantPollutant?: string
+  healthNote?: string
+  source: 'google_air_quality' | 'unavailable'
+  confidence: 'high' | 'unavailable'
+  /** Which AQI scale the value uses: 'local' (e.g. India CPCB 0–500) or 'universal' (Google UAQI 0–100, higher is better). */
+  scale?: 'local' | 'universal'
+}
+
+/** Time-zone context for the destination / a place. */
+export interface TimeZoneContext {
+  timeZoneId?: string
+  timeZoneName?: string
+  utcOffsetMinutes?: number
+  source: 'google_time_zone' | 'destination_default' | 'unavailable'
+}
+
+/**
+ * Aggregated location context for one activity. Optional and additive — old
+ * trips without it keep working.
+ */
+export interface ActivityContext {
+  elevationMeters?: number
+  elevationFeet?: number
+  elevationSource?: 'google_elevation' | 'unavailable'
+  elevationConfidence?: 'high' | 'unavailable'
+  weatherSnapshot?: WeatherSnapshot
+  aqiSnapshot?: AqiSnapshot
+  timeZoneContext?: TimeZoneContext
+  /** Short, plain-language cautions (rain, AQI, altitude, heat, cold). */
+  contextWarnings?: string[]
+  /** ISO timestamp the context enrichment ran. */
+  enrichedAt?: string
+}
+
+/**
+ * Phase 16F — practical "what to carry" suggestion derived from the location
+ * context. Advisory only; never prescribes medicine or casual oxygen use.
+ */
+export interface EssentialSuggestion {
+  category: 'air_quality' | 'altitude' | 'weather' | 'rain' | 'cold' | 'heat' | 'general'
+  priority: 'must_carry' | 'recommended' | 'optional'
+  item: string
+  reason: string
+  basedOn: {
+    aqi?: number
+    elevationFeet?: number
+    temperatureC?: number
+    rainProbability?: number
+  }
+  medicalDisclaimer?: string
+}
+
 /** A single AI-proposed activity in the generated plan (never auto-applied). */
 export interface GeneratedActivity {
   title: string
@@ -1519,6 +1596,8 @@ export interface GeneratedActivity {
   spendBasis?: 'google_price_level' | 'heuristic'
   /** Short reason tags explaining the suggestion (e.g. "Google-verified", "Budget-friendly"). */
   reasonTags?: string[]
+  // Phase 16F — location context (elevation / weather / AQI / time zone). Optional.
+  activityContext?: ActivityContext
 }
 
 /** A proposed day in the generated plan. */

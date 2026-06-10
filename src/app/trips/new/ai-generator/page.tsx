@@ -218,6 +218,27 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   return out as T
 }
 
+/**
+ * Recursively drop `undefined` values from nested objects/arrays — Firestore
+ * rejects `undefined` at any depth (the app does not set ignoreUndefinedProperties).
+ * Returns `undefined` when the result is empty so callers can omit the field.
+ */
+function pruneDeep<T>(value: T): T | undefined {
+  if (Array.isArray(value)) {
+    const arr = value.map((v) => pruneDeep(v)).filter((v) => v !== undefined)
+    return arr as unknown as T
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const pruned = pruneDeep(v)
+      if (pruned !== undefined) out[k] = pruned
+    }
+    return (Object.keys(out).length > 0 ? out : undefined) as T | undefined
+  }
+  return value
+}
+
 function toggle<T>(arr: T[], val: T): T[] {
   return arr.includes(val) ? arr.filter((v) => v !== val) : [...arr, val]
 }
@@ -880,6 +901,8 @@ export default function NewTripAiGeneratorPage() {
               lng: a._lng,
               suggestedCategorySource: a._autoCategory ? ('google_place_type' as const) : undefined,
               foodInsight: foodInsightFromSuggestion,
+              // Phase 16F — persist location context (elevation/weather/AQI/time zone).
+              activityContext: a._activityContext ? pruneDeep(a._activityContext) : undefined,
               updatedAt: new Date().toISOString(),
             }) as Activity
           })
@@ -950,7 +973,11 @@ export default function NewTripAiGeneratorPage() {
         }
 
         if (activities.length > 0) {
-          await updateItineraryDay(tripId, day.id, { activities })
+          // Phase 16F — persist day-level "what to carry" suggestions alongside activities.
+          const essentialSuggestions = ed._essentials?.length
+            ? (pruneDeep(ed._essentials) as typeof ed._essentials)
+            : undefined
+          await updateItineraryDay(tripId, day.id, stripUndefined({ activities, essentialSuggestions }))
         }
       }
 

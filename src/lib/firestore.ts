@@ -186,7 +186,7 @@ export async function getItineraryDays(tripId: string): Promise<ItineraryDay[]> 
 export async function updateItineraryDay(
   tripId: string,
   dayId: string,
-  updates: Partial<Pick<ItineraryDay, 'date' | 'dayNumber' | 'activities'>>,
+  updates: Partial<Pick<ItineraryDay, 'date' | 'dayNumber' | 'activities' | 'essentialSuggestions'>>,
 ): Promise<void> {
   await updateDoc(doc(db, 'trips', tripId, 'days', dayId), updates)
 }

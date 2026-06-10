@@ -23,7 +23,7 @@ import { motion } from 'framer-motion'
 import {
   Sparkles, AlertTriangle, Trash2, RotateCcw, Check, Loader2, MapPin,
   Wallet, Route, Info, ArrowRightLeft, ShieldCheck, ShieldAlert, Home,
-  Clock, Navigation2,
+  Clock, Navigation2, Mountain, Cloud, Wind, Backpack,
 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -32,9 +32,12 @@ import type {
   TripGeneratorResult, GeneratedActivity, ActivityCategory,
   PlaceSearchResult, OptimiseRouteResult, GeneratedDayRoute,
   BudgetInclusion, BudgetCategoryKey, PlannedTransport, PlannedStay,
+  ActivityContext, EssentialSuggestion, TimeZoneContext,
 } from '@/types'
 import { getDurationEstimate, buildDayTiming, fmtMins, parseHHMM } from '@/lib/ai/activityDuration'
 import type { TimingLeg } from '@/app/api/maps/itinerary-timing/route'
+import type { PlaceContextResponse } from '@/app/api/maps/place-context/route'
+import { buildContextWarnings, buildEssentialSuggestions, isOutdoorCategory } from '@/lib/context/essentials'
 
 export interface EditableGeneratedActivity extends GeneratedActivity {
   _key: string
@@ -57,6 +60,8 @@ export interface EditableGeneratedActivity extends GeneratedActivity {
   _travelToNextDistText?: string  // "22 min"
   _travelToNextDistKm?: string    // "8.4 km"
   _travelRouteSource?: 'google_routes' | 'estimate'
+  // Phase 16F — location context (elevation / weather / AQI) + derived warnings
+  _activityContext?: ActivityContext
 }
 export interface EditableGeneratedDay {
   date: string
@@ -71,6 +76,8 @@ export interface EditableGeneratedDay {
     travelMins: number
     paceWarning?: string
   }
+  // Phase 16F — day-level "what to carry" suggestions
+  _essentials?: EssentialSuggestion[]
 }
 
 export interface PreviewBudgetContext {
@@ -138,6 +145,103 @@ function verifyState(a: EditableGeneratedActivity): 'verified' | 'unverified' | 
   return 'neutral'
 }
 
+// ── Phase 16F — compact location-context display ────────────────────────────
+
+/** Colour-band the AQI chip from its category text (scale-agnostic). */
+function aqiChipColor(category: string | undefined): string {
+  const c = (category ?? '').toLowerCase()
+  if (/(severe|hazardous|very poor|bad|unhealthy|poor)/.test(c)) return 'text-red-600'
+  if (/(moderate|satisfactory|low|acceptable)/.test(c)) return 'text-amber-600'
+  if (/(good|excellent|clean)/.test(c)) return 'text-emerald-600'
+  return 'text-gray-500'
+}
+
+/** Renders elevation / weather / AQI lines + any context warnings for one activity. */
+function ActivityContextLines({ ctx }: { ctx?: ActivityContext }) {
+  if (!ctx) return null
+  const hasElevation = ctx.elevationMeters != null
+  const w = ctx.weatherSnapshot
+  const hasWeather = w && w.source !== 'unavailable' && (w.temperatureC != null || w.condition || w.precipitationProbability != null)
+  const aqi = ctx.aqiSnapshot
+  const hasAqi = aqi && aqi.source !== 'unavailable' && aqi.aqi != null
+  const warnings = ctx.contextWarnings ?? []
+  if (!hasElevation && !hasWeather && !hasAqi && warnings.length === 0) return null
+
+  return (
+    <div className="mt-0.5 space-y-0.5">
+      {(hasElevation || hasWeather || hasAqi) && (
+        <div className="flex items-center flex-wrap gap-x-2.5 gap-y-0.5 text-[10px] text-gray-500">
+          {hasElevation && (
+            <span className="inline-flex items-center gap-1">
+              <Mountain size={9} className="flex-shrink-0 text-stone-400" />
+              {ctx.elevationMeters!.toLocaleString()} m / {ctx.elevationFeet!.toLocaleString()} ft
+            </span>
+          )}
+          {hasWeather && (
+            <span className="inline-flex items-center gap-1">
+              <Cloud size={9} className="flex-shrink-0 text-sky-400" />
+              {w!.temperatureC != null ? `${w!.temperatureC}°C` : ''}
+              {w!.temperatureC != null && w!.condition ? ', ' : ''}
+              {w!.condition ?? ''}
+              {w!.confidence === 'low' ? ' (approx.)' : ''}
+            </span>
+          )}
+          {hasWeather && w!.precipitationProbability != null && w!.precipitationProbability >= 40 && (
+            <span className="inline-flex items-center gap-1 text-sky-600">
+              <Wind size={9} className="flex-shrink-0" />
+              Rain risk: {Math.round(w!.precipitationProbability)}%
+            </span>
+          )}
+          {hasAqi && (
+            <span className={`inline-flex items-center gap-1 ${aqiChipColor(aqi!.category)}`}>
+              AQI: {aqi!.aqi}{aqi!.category ? ` — ${aqi!.category}` : ''}
+            </span>
+          )}
+        </div>
+      )}
+      {warnings.map((wn, i) => (
+        <div key={i} className="flex items-start gap-1 text-[10px] text-amber-600">
+          <AlertTriangle size={9} className="flex-shrink-0 mt-0.5" />
+          <span>{wn}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Day-level "what to carry" suggestions. */
+function EssentialsBlock({ essentials }: { essentials?: EssentialSuggestion[] }) {
+  if (!essentials || essentials.length === 0) return null
+  const priorityColor: Record<EssentialSuggestion['priority'], string> = {
+    must_carry: 'text-red-600',
+    recommended: 'text-amber-600',
+    optional: 'text-gray-500',
+  }
+  const priorityLabel: Record<EssentialSuggestion['priority'], string> = {
+    must_carry: 'Must carry',
+    recommended: 'Recommended',
+    optional: 'Optional',
+  }
+  return (
+    <div className="mb-2 rounded-lg bg-amber-50/60 border border-amber-100 px-2.5 py-1.5">
+      <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-700 mb-1">
+        <Backpack size={11} /> Carry suggestions
+      </div>
+      <ul className="space-y-0.5">
+        {essentials.map((e, i) => (
+          <li key={i} className="text-[10px] text-gray-600 leading-snug">
+            <span className={`font-semibold ${priorityColor[e.priority]}`}>
+              {priorityLabel[e.priority]}:
+            </span>{' '}
+            <span className="font-medium text-gray-700">{e.item}</span>
+            {' — '}{e.reason}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export default function GeneratedItineraryPreview({
   result, currency, travellerCount, isMock, applying, applyNote, mapsAvailable,
   applyLabel = 'Apply to trip', applyingLabel = 'Applying…',
@@ -166,6 +270,9 @@ export default function GeneratedItineraryPreview({
   const autoRanForRef = useRef<TripGeneratorResult | null>(null)
   const [autoRunning, setAutoRunning] = useState(false)
   const [timingDone, setTimingDone] = useState(false)
+  // Phase 16F — location context enrichment
+  const [contextDone, setContextDone] = useState(false)
+  const [timeZone, setTimeZone] = useState<TimeZoneContext | null>(null)
 
   // Rebuild editable state whenever a new result arrives. commitDays keeps the
   // ref in sync synchronously so the auto-run effect sees fresh data.
@@ -182,6 +289,10 @@ export default function GeneratedItineraryPreview({
     })))
     setDayRoutes({})
     setEnrichNote(null)
+    // Phase 16E/16F — reset enrichment flags so a regenerate re-runs cleanly.
+    setTimingDone(false)
+    setContextDone(false)
+    setTimeZone(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result])
 
@@ -545,6 +656,78 @@ export default function GeneratedItineraryPreview({
     void usedGoogle // suppress unused warning
   }
 
+  // ── Phase 16F: location context enrichment ───────────────────────────────────
+
+  /**
+   * For each geocoded activity, fetch elevation / weather (for the day's date) /
+   * AQI via /api/maps/place-context, then derive per-activity warnings and a
+   * per-day "what to carry" list. Fails soft: any unavailable field is simply
+   * not shown, and a total failure leaves the plan untouched.
+   */
+  async function enrichContext(): Promise<void> {
+    if (!mapsAvailable) { setContextDone(true); return }
+    const base = editDaysRef.current
+
+    // Collect geocoded points with their planned date (for weather matching).
+    const points: Array<{ key: string; lat: number; lng: number; date?: string }> = []
+    let destination: { lat: number; lng: number } | undefined
+    for (const d of base) {
+      for (const a of d.activities) {
+        if (a._removed || a._lat == null || a._lng == null) continue
+        points.push({ key: a._key, lat: a._lat, lng: a._lng, date: d.date })
+        if (!destination) destination = { lat: a._lat, lng: a._lng }
+      }
+    }
+    if (points.length === 0) { setContextDone(true); return }
+
+    let data: PlaceContextResponse | null = null
+    try {
+      const res = await fetch('/api/maps/place-context', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points, destination }),
+      })
+      if (res.ok) data = await res.json() as PlaceContextResponse
+    } catch { /* leave plan untouched on failure */ }
+
+    if (!data || !data.available) { setContextDone(true); return }
+    if (data.timeZone) setTimeZone(data.timeZone)
+
+    const ctxByKey = new Map(data.contexts.map((c) => [c.key, c]))
+    const enrichedAt = new Date().toISOString()
+
+    const next = base.map((d) => {
+      const dayContexts: ActivityContext[] = []
+      const activities = d.activities.map((a) => {
+        const c = ctxByKey.get(a._key)
+        if (!c) return a
+        const context: ActivityContext = {
+          elevationMeters: c.elevationMeters,
+          elevationFeet: c.elevationFeet,
+          elevationSource: c.elevationSource,
+          elevationConfidence: c.elevationConfidence,
+          weatherSnapshot: c.weatherSnapshot,
+          aqiSnapshot: c.aqiSnapshot,
+          timeZoneContext: data!.timeZone,
+          enrichedAt,
+        }
+        const warnings = buildContextWarnings(context, isOutdoorCategory(a.category))
+        if (warnings.length > 0) context.contextWarnings = warnings
+        if (!a._removed) dayContexts.push(context)
+        return { ...a, _activityContext: context }
+      })
+      const essentials = buildEssentialSuggestions(dayContexts)
+      return {
+        ...d,
+        activities,
+        ...(essentials.length > 0 ? { _essentials: essentials } : {}),
+      }
+    })
+
+    commitDays(next)
+    setContextDone(true)
+  }
+
   // ── Auto-run: enrich + optimise before the final preview ──────────────────
   //
   // React 18 Strict Mode double-invokes effects: cleanup fires between run 1
@@ -583,6 +766,7 @@ export default function GeneratedItineraryPreview({
         // Skip route optimisation if the effect was already cleaned up.
         if (!cancelled) await optimiseAllDays()
         if (!cancelled) await enrichTiming()
+        if (!cancelled) await enrichContext()
       } catch {
         // swallow; loading state is cleared in finally regardless
       } finally {
@@ -764,6 +948,12 @@ export default function GeneratedItineraryPreview({
         {geocodedCount > 0 && <span className="text-[11px] text-emerald-600 font-semibold">{geocodedCount} place(s) located</span>}
       </div>
       {enrichNote && <p className="text-[11px] text-gray-500 mb-2 flex items-center gap-1"><Info size={11} /> {enrichNote}</p>}
+      {/* Phase 16F — show time zone only when it differs from India (avoids clutter). */}
+      {timeZone?.timeZoneId && timeZone.timeZoneId !== 'Asia/Kolkata' && (
+        <p className="text-[11px] text-gray-500 mb-2 flex items-center gap-1">
+          <Clock size={11} /> Destination time zone: {timeZone.timeZoneName ?? timeZone.timeZoneId}
+        </p>
+      )}
 
       {/* Day-by-day editable plan */}
       <div className="space-y-4">
@@ -823,6 +1013,9 @@ export default function GeneratedItineraryPreview({
                   )}
                 </div>
               )}
+
+              {/* Phase 16F — day-level carry suggestions */}
+              <EssentialsBlock essentials={d._essentials} />
 
               <div className="space-y-1.5">
                 {d.activities.map((act) => (
@@ -957,6 +1150,8 @@ function ActivityRow({
               {act._travelRouteSource === 'estimate' && <span className="text-gray-400">(est.)</span>}
             </div>
           )}
+          {/* Phase 16F — location context (elevation / weather / AQI) + warnings */}
+          <ActivityContextLines ctx={act._activityContext} />
         </div>
         <input
           type="number" min="0"
