@@ -35,20 +35,57 @@ import type {
   RouteOptimisationMethod,
 } from '@/types'
 
+export type MapsKeySource = 'server_key' | 'public_key_fallback' | 'none'
+
+/**
+ * Which key source the server is actually using.
+ *
+ * 'server_key'         — GOOGLE_MAPS_API_KEY is set (Secret Manager / env).
+ *                        This key should be unrestricted (no HTTP-referrer lock)
+ *                        so it can call Google APIs from Cloud Run.
+ * 'public_key_fallback'— Only NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is available.
+ *                        Browser keys are typically HTTP-referrer restricted and
+ *                        WILL be rejected by Google when called from a server
+ *                        (no referrer header). Google returns 403; we surface 502.
+ * 'none'               — No key is set at all; Maps features are unavailable.
+ */
+export function getMapsKeySource(): MapsKeySource {
+  if (process.env.GOOGLE_MAPS_API_KEY?.trim()) return 'server_key'
+  if (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim()) return 'public_key_fallback'
+  return 'none'
+}
+
 export function getServerMapsKey(): string {
+  const source = getMapsKeySource()
+  if (source === 'none') return ''
+  if (source === 'public_key_fallback') {
+    // Warn once per process. Browser keys are usually HTTP-referrer restricted;
+    // Google will reject server-side calls with 403. Set GOOGLE_MAPS_API_KEY
+    // (an unrestricted server key) as a Secret Manager secret to fix this.
+    console.warn(
+      '[Voyago Maps] WARNING: GOOGLE_MAPS_API_KEY is not set. ' +
+      'Falling back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY which is a browser-restricted key. ' +
+      'Server-side Google API calls will likely fail with 403. ' +
+      'Add GOOGLE_MAPS_API_KEY as a Secret Manager secret in apphosting.yaml.',
+    )
+  }
   return (
-    process.env.GOOGLE_MAPS_API_KEY ??
-    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ??
+    process.env.GOOGLE_MAPS_API_KEY?.trim() ??
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ??
     ''
-  ).trim()
+  )
 }
 
-/** A key is configured server-side (does not reveal the key). */
+/** A properly-configured server key is present (not just the public browser key). */
 export function isMapsServerConfigured(): boolean {
-  return getServerMapsKey().length > 0
+  return getMapsKeySource() !== 'none'
 }
 
-/** Maps features are usable: feature flag on AND a key is configured. */
+/**
+ * Maps features are usable: feature flag on AND some key is set.
+ * NOTE: if keySource === 'public_key_fallback', calls may still fail 403.
+ * Check getMapsKeySource() === 'server_key' for guaranteed operability.
+ */
 export function isMapsAvailable(): boolean {
   return isFeatureEnabled('mapFeatures') && isMapsServerConfigured()
 }

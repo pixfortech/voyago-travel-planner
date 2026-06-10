@@ -96,12 +96,23 @@ export default function AiGeneratorPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input }),
       })
-      if (!res.ok) throw new Error('request_failed')
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({})) as { error?: string; message?: string }
+        const serverMsg = errBody.message ?? errBody.error ?? null
+        if (res.status === 429) {
+          setGenError('You are generating too quickly. Please wait a moment and try again.')
+        } else if (serverMsg) {
+          setGenError(serverMsg)
+        } else {
+          setGenError('Could not generate an itinerary right now. Please try again.')
+        }
+        return
+      }
       const data = await res.json() as { result: TripGeneratorResult; isMock: boolean }
       setResult(data.result)
       setIsMock(data.isMock)
     } catch {
-      setGenError('Could not generate an itinerary right now. Please try again.')
+      setGenError('Could not reach the server. Check your connection and try again.')
     } finally {
       setGenerating(false)
     }

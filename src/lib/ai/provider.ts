@@ -19,16 +19,40 @@ import type { AiProvider } from './types'
 export function resolveAiProvider(): AiProvider {
   const override = process.env.AI_PROVIDER
   const apiKey = process.env.ANTHROPIC_API_KEY
+  const isProd = process.env.NODE_ENV === 'production'
 
+  // Explicit mock opt-in: AI_PROVIDER=mock or local dev with no key.
   if (override === 'mock') return createMockProvider()
+
+  // Explicit Anthropic: must have the key.
   if (override === 'anthropic') {
     if (!apiKey) {
+      console.error(
+        '[Voyago AI] ANTHROPIC_API_KEY is not set but AI_PROVIDER=anthropic. ' +
+        'Ensure the "anthropicApiKey" secret is created in Secret Manager and the ' +
+        'Cloud Run service account has roles/secretmanager.secretAccessor.',
+      )
       throw new Error('AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set')
     }
     return createAnthropicProvider(apiKey)
   }
 
-  return apiKey ? createAnthropicProvider(apiKey) : createMockProvider()
+  // Auto mode (no AI_PROVIDER set):
+  //  - With a key → real Anthropic.
+  //  - Without a key in production → error (prevents silent mock data in prod).
+  //  - Without a key in dev → mock (convenient local fallback).
+  if (apiKey) return createAnthropicProvider(apiKey)
+  if (isProd) {
+    console.error(
+      '[Voyago AI] ANTHROPIC_API_KEY is not set in production. ' +
+      'Ensure the "anthropicApiKey" secret is created in Secret Manager and the ' +
+      'Cloud Run service account has roles/secretmanager.secretAccessor. ' +
+      'Set AI_PROVIDER=mock explicitly if you intend to run without real AI.',
+    )
+    throw new Error('ANTHROPIC_API_KEY is not configured in production')
+  }
+  // Non-production with no key → convenient dev mock.
+  return createMockProvider()
 }
 
 /** Non-secret status for health checks — never exposes the key itself. */

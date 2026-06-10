@@ -8,7 +8,7 @@
 
 import { NextResponse } from 'next/server'
 import { isFeatureEnabled } from '@/lib/flags'
-import { isMapsServerConfigured } from '@/lib/maps/googleServer'
+import { isMapsServerConfigured, getMapsKeySource } from '@/lib/maps/googleServer'
 import { rateLimit, clientKey } from '@/lib/server/rateLimit'
 import type { MapsStatus } from '@/types'
 
@@ -26,10 +26,14 @@ export async function GET(request: Request) {
 
   const featureEnabled = isFeatureEnabled('mapFeatures')
   const configured = isMapsServerConfigured()
+  const keySource = getMapsKeySource()
   const status: MapsStatus = {
     featureEnabled,
     configured,
     available: featureEnabled && configured,
   }
-  return NextResponse.json(status)
+  // keySource is diagnostic metadata — tells operators which key is in use
+  // without exposing its value. 'public_key_fallback' means server calls will
+  // likely fail with 403; only 'server_key' is reliable for server-side usage.
+  return NextResponse.json({ ...status, keySource })
 }

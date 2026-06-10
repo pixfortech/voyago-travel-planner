@@ -1,5 +1,6 @@
-# Settings for Backend (on Cloud Run).
-# See https://firebase.google.com/docs/app-hosting/configure#cloud-run
+# Firebase App Hosting — Cloud Run configuration.
+# See https://firebase.google.com/docs/app-hosting/configure
+
 runConfig:
   minInstances: 0
   # maxInstances: 100
@@ -7,12 +8,8 @@ runConfig:
   # cpu: 1
   # memoryMiB: 512
 
-# Environment variables and secrets.
-# Settings for Backend (on Cloud Run).
-runConfig:
-  minInstances: 0
-
 env:
+  # ── Firebase client config (baked in at build AND available at runtime) ──────
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
     value: "AIzaSyDUNGaUtnMDn4fmtkzAbKGms2HVqXZdJ1U"
     availability:
@@ -49,22 +46,33 @@ env:
       - BUILD
       - RUNTIME
 
+  # ── Feature flags (baked in at build) ────────────────────────────────────────
   - variable: NEXT_PUBLIC_FLAG_MAP_FEATURES
     value: "true"
     availability:
       - BUILD
       - RUNTIME
 
+  # ── Google Maps browser key (client-side JS only — HTTP-referrer restricted) ─
+  # DO NOT use this key for server-side API calls. Add GOOGLE_MAPS_API_KEY (below)
+  # as an unrestricted secret for server-to-Google communication.
   - variable: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
     value: "AIzaSyAVgP_8ckQ1fJ64lbvh7xDQPSLyAOmy-0Q"
     availability:
       - BUILD
       - RUNTIME
 
+  # ── AI provider (runtime only — never exposed to the browser) ─────────────────
+  # Set to "anthropic" to require ANTHROPIC_API_KEY; "mock" forces the dev mock.
   - variable: AI_PROVIDER
     value: "anthropic"
     availability:
       - RUNTIME
+
+  # ── Server-side secrets (managed via Google Secret Manager) ───────────────────
+  # Create these secrets with: gcloud secrets create <name> --data-file=<file>
+  # Grant access:  gcloud secrets add-iam-policy-binding <name> \
+  #   --member="serviceAccount:<cloud-run-sa>" --role="roles/secretmanager.secretAccessor"
 
   - variable: GOOGLE_MAPS_API_KEY
     secret: googleMapsApiKey

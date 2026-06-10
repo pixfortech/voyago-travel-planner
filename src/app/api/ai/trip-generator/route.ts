@@ -65,9 +65,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'invalid_input' }, { status: 400 })
   }
 
-  const provider = resolveAiProvider()
+  let provider
+  try {
+    provider = resolveAiProvider()
+  } catch (err) {
+    // resolveAiProvider throws when AI_PROVIDER=anthropic but no key is set.
+    // This is always logged (not gated on NODE_ENV) so Cloud Run surfaces it.
+    console.error('[Voyago AI] trip-generator: provider init failed:', err instanceof Error ? err.message : err)
+    return NextResponse.json(
+      { error: 'ai_unavailable', message: 'The AI service is not configured. Please check server settings.' },
+      { status: 502 },
+    )
+  }
 
   if (provider.isMock) {
+    // Mock is only allowed when AI_PROVIDER=mock or in non-production auto mode.
+    // In production this path is never reached (resolveAiProvider throws instead).
     const payload: TripGeneratorResponse = {
       result: mockTripGeneratorResult(input),
       isMock: true,
@@ -92,9 +105,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json(payload)
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('[Voyago AI] trip-generator provider error:', err)
-    }
+    console.error('[Voyago AI] trip-generator: Anthropic call failed:', err instanceof Error ? err.message : err)
     return NextResponse.json(
       { error: 'ai_unavailable', message: 'The AI provider could not be reached. Please try again.' },
       { status: 502 },
