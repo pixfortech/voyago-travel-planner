@@ -57,7 +57,7 @@ env:
   # DO NOT use this key for server-side API calls. Add GOOGLE_MAPS_API_KEY (below)
   # as an unrestricted secret for server-to-Google communication.
   - variable: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-    value: "AIzaSyAVgP_8ckQ1fJ64lbvh7xDQPSLyAOmy-0Q"
+    value: "AIzaSyDgT7-I43pbNQN8oqeyADgxqVGAv2lswxY"
     availability:
       - BUILD
       - RUNTIME
