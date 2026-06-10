@@ -53,15 +53,23 @@ function estimateSpend(
   let confidence: 'low' | 'medium' | 'high'
   let basis: 'google_price_level' | 'heuristic'
 
+  // Confidence reflects how exact the pricing source is — never overstate it:
+  //   high   — only for user-entered exact cost or a reliable explicit pricing
+  //            source (not produced by this Google-derived estimator).
+  //   medium — Google priceLevel band (a rough bucket, not exact menu pricing)
+  //            corroborated by rating / type.
+  //   low    — heuristic from food budget style only, with no priceLevel signal.
   if (priceLevel != null && PRICE_LEVEL_RANGES[priceLevel]) {
     ;[perMin, perMax] = PRICE_LEVEL_RANGES[priceLevel]!
-    confidence = 'high'
+    confidence = 'medium'
     basis = 'google_price_level'
   } else {
     const [lo, hi] = STYLE_RANGES[foodBudgetStyle ?? 'mid_range'] ?? [150, 450]
     perMin = lo
     perMax = hi
-    confidence = priceLevel !== undefined ? 'medium' : 'low'
+    // A priceLevel that exists but has no mapped band still nudges us above a
+    // pure style guess, but stays heuristic and capped at low confidence.
+    confidence = 'low'
     basis = 'heuristic'
   }
 
