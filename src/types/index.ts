@@ -151,6 +151,15 @@ export interface Activity {
   visitedConfidence?: VisitedConfidence
   visitedSource?: VisitedSource
   visitedLocationPointId?: string    // location/memory point that matched
+  // Phase 16E — itinerary timing (optional, backward-compatible)
+  estimatedDurationMinutes?: number
+  travelToNextMinutes?: number
+  travelToNextDistanceMeters?: number
+  travelToNextDistanceText?: string
+  travelToNextDurationText?: string
+  routeMode?: string
+  routeSource?: 'google_routes' | 'estimate' | 'unavailable'
+  routeConfidence?: 'high' | 'medium' | 'low'
 }
 
 export interface ItineraryDay {
@@ -1487,6 +1496,10 @@ export interface GeneratedActivity {
    * place and the candidate must be resolved via Google Places before applying.
    */
   needsVerification?: boolean
+  // Phase 16E — duration hints from AI (optional; timing engine validates/overrides)
+  estimatedDurationMinutes?: number
+  durationConfidence?: 'high' | 'medium' | 'low'
+  durationReason?: string
   // ── Phase 16D — Google-backed food suggestions (optional, food activities only) ──
   /** Meal type — helps the enrichment step pick the right search query. */
   mealType?: 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'cafe'

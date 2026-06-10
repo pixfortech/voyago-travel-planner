@@ -63,6 +63,10 @@ Other hard rules:
   labelled as approximate. All numbers are estimates.
 - Costs are in the trip's currency. estimatedCost is the TOTAL for the whole group;
   estimatedCostPerPerson is per traveller.
+- For EVERY activity provide a realistic "timeToSpend" and set "estimatedDurationMinutes" (integer minutes).
+  Use these as starting benchmarks: viewpoint 30–45, temple/monastery 45–75, museum 60–90,
+  fort/palace 60–120, market 60–90, food break 45–60, café/snack 30–45, adventure 60–120.
+  Never set a duration under 20 min for any stop the traveller will physically visit.
 - Return ONLY valid JSON. No markdown, no code fences, no commentary.`
 
 function compositionLine(input: TripGeneratorInput): string {
@@ -224,6 +228,7 @@ Return a JSON object exactly matching this shape:
           "routeNotes": "travel note to next stop",
           "whyRecommended": "why this fits the group",
           "timeToSpend": "e.g. 1–2 hrs",
+          "estimatedDurationMinutes": 60,
           "isBreak": false
         }
       ]
@@ -303,6 +308,9 @@ function coerceActivity(raw: unknown): GeneratedActivity {
     needsVerification: a.needsVerification === true ? true : undefined,
     mealType: (['breakfast', 'lunch', 'dinner', 'snack', 'cafe'] as const).includes(a.mealType as 'breakfast')
       ? (a.mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'cafe')
+      : undefined,
+    estimatedDurationMinutes: typeof a.estimatedDurationMinutes === 'number' && a.estimatedDurationMinutes > 0
+      ? Math.min(Math.round(a.estimatedDurationMinutes), 480)
       : undefined,
   }
 }

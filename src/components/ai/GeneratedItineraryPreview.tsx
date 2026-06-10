@@ -23,6 +23,7 @@ import { motion } from 'framer-motion'
 import {
   Sparkles, AlertTriangle, Trash2, RotateCcw, Check, Loader2, MapPin,
   Wallet, Route, Info, ArrowRightLeft, ShieldCheck, ShieldAlert, Home,
+  Clock, Navigation2,
 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -32,6 +33,8 @@ import type {
   PlaceSearchResult, OptimiseRouteResult, GeneratedDayRoute,
   BudgetInclusion, BudgetCategoryKey, PlannedTransport, PlannedStay,
 } from '@/types'
+import { getDurationEstimate, buildDayTiming, fmtMins, parseHHMM } from '@/lib/ai/activityDuration'
+import type { TimingLeg } from '@/app/api/maps/itinerary-timing/route'
 
 export interface EditableGeneratedActivity extends GeneratedActivity {
   _key: string
@@ -45,12 +48,29 @@ export interface EditableGeneratedActivity extends GeneratedActivity {
   _priceLevel?: number
   _enriched?: boolean        // an enrichment attempt completed
   _autoCategory?: boolean    // category was set from Google place types
+  // Phase 16E — timing
+  _durationMins?: number
+  _plannedStart?: string     // HH:MM computed by timing engine
+  _plannedEnd?: string       // HH:MM computed by timing engine
+  _travelToNextMins?: number
+  _travelToNextMeters?: number
+  _travelToNextDistText?: string  // "22 min"
+  _travelToNextDistKm?: string    // "8.4 km"
+  _travelRouteSource?: 'google_routes' | 'estimate'
 }
 export interface EditableGeneratedDay {
   date: string
   dayNumber: number
   theme?: string
   activities: EditableGeneratedActivity[]
+  // Phase 16E — day timing summary
+  _timingSummary?: {
+    dayStart: string
+    dayEnd: string
+    activityMins: number
+    travelMins: number
+    paceWarning?: string
+  }
 }
 
 export interface PreviewBudgetContext {
@@ -145,6 +165,7 @@ export default function GeneratedItineraryPreview({
   // Auto-run guard (enrich + optimise once per result).
   const autoRanForRef = useRef<TripGeneratorResult | null>(null)
   const [autoRunning, setAutoRunning] = useState(false)
+  const [timingDone, setTimingDone] = useState(false)
 
   // Rebuild editable state whenever a new result arrives. commitDays keeps the
   // ref in sync synchronously so the auto-run effect sees fresh data.
@@ -391,6 +412,139 @@ export default function GeneratedItineraryPreview({
     setOptimisingAll(false)
   }
 
+  // ── Phase 16E: timing enrichment ─────────────────────────────────────────────
+
+  /**
+   * For each day, compute: (a) duration per activity via category defaults +
+   * AI timeToSpend, and (b) travel time to the next geocoded stop via
+   * /api/maps/itinerary-timing (Google Routes) or haversine fallback.
+   * Then thread start/end times through buildDayTiming().
+   */
+  async function enrichTiming(): Promise<void> {
+    const base = editDaysRef.current
+
+    // Build per-day point lists for the server (geocoded activities only).
+    const dayInputs: Array<{ date: string; points: Array<{ key: string; name: string; lat: number; lng: number }> }> = []
+    for (const d of base) {
+      const pts = d.activities
+        .filter((a) => !a._removed && a._lat != null && a._lng != null)
+        .map((a) => ({ key: a._key, name: a.title, lat: a._lat!, lng: a._lng! }))
+      if (pts.length >= 2) dayInputs.push({ date: d.date, points: pts })
+    }
+
+    // Fetch Google leg timings; fall back to haversine if unavailable.
+    let serverLegs: TimingLeg[] = []
+    let usedGoogle = false
+    if (mapsAvailable && dayInputs.length > 0) {
+      try {
+        const res = await fetch('/api/maps/itinerary-timing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ days: dayInputs, travelMode: 'driving' }),
+        })
+        if (res.ok) {
+          const data = await res.json() as { available: boolean; legs: TimingLeg[] }
+          if (data.available) { serverLegs = data.legs; usedGoogle = true }
+        }
+      } catch { /* fall through to haversine */ }
+    }
+
+    // Build a leg lookup: key = "fromKey" → travel info.
+    // For missing legs (server didn't return or not enough points), use haversine.
+    const legLookup = new Map<string, { travelMins: number; distMeters: number; distText: string; durationText: string; source: 'google_routes' | 'estimate' }>()
+    for (const l of serverLegs) {
+      legLookup.set(l.fromKey, {
+        travelMins: Math.round(l.durationSeconds / 60),
+        distMeters: l.distanceMeters,
+        distText: l.distanceText,
+        durationText: l.durationText,
+        source: 'google_routes',
+      })
+    }
+
+    // Haversine fallback for pairs that Google didn't return.
+    // India urban average speed: 25 km/h for mountain/city.
+    const URBAN_KMH = 25
+    for (const d of base) {
+      const geocoded = d.activities.filter((a) => !a._removed && a._lat != null && a._lng != null)
+      for (let i = 0; i < geocoded.length - 1; i++) {
+        const a = geocoded[i]!
+        if (legLookup.has(a._key)) continue  // already have Google data
+        const b = geocoded[i + 1]!
+        const distM = haversine({ lat: a._lat!, lng: a._lng! }, { lat: b._lat!, lng: b._lng! })
+        const distKm = distM / 1000
+        const mins = Math.max(1, Math.round(distKm / URBAN_KMH * 60))
+        const distText = distKm >= 1 ? `${distKm.toFixed(1)} km` : `${Math.round(distM)} m`
+        legLookup.set(a._key, {
+          travelMins: mins,
+          distMeters: Math.round(distM),
+          distText,
+          durationText: fmtMins(mins),
+          source: 'estimate',
+        })
+      }
+    }
+
+    // Now build per-day timing and patch all activities.
+    const next = base.map((d) => {
+      const active = d.activities.filter((a) => !a._removed)
+      if (active.length === 0) return d
+
+      // Day start: use AI's first non-hotel startTime, else 09:00.
+      const firstWithTime = active.find((a) => a.category !== 'hotel' && a.startTime)
+      const dayStartMins = parseHHMM(firstWithTime?.startTime) ?? 9 * 60
+
+      // Compute duration for each activity.
+      const withDuration = active.map((a) => ({
+        key: a._key,
+        durationMins: getDurationEstimate(a.category, a.title, a.timeToSpend, a.mealType).minutes,
+        isBase: a.category === 'hotel',
+      }))
+
+      // Build leg list for the timing engine (from→ travel mins).
+      const legList = active.map((a) => {
+        const l = legLookup.get(a._key)
+        return { fromKey: a._key, travelMins: l?.travelMins ?? 0 }
+      })
+
+      const { timings, summary } = buildDayTiming(withDuration, legList, dayStartMins)
+      const timingByKey = new Map(timings.map((t) => [t.key, t]))
+
+      // Patch activities.
+      const patchedActivities = d.activities.map((a) => {
+        const t = timingByKey.get(a._key)
+        const leg = legLookup.get(a._key)
+        return {
+          ...a,
+          _durationMins: t?.durationMins,
+          _plannedStart: t?.plannedStart,
+          _plannedEnd: t?.plannedEnd,
+          _travelToNextMins: leg?.travelMins,
+          _travelToNextMeters: leg?.distMeters,
+          _travelToNextDistText: leg?.durationText,
+          _travelToNextDistKm: leg?.distText,
+          _travelRouteSource: leg?.source,
+        }
+      })
+
+      return {
+        ...d,
+        activities: patchedActivities,
+        _timingSummary: {
+          dayStart: summary.dayStart,
+          dayEnd: summary.dayEnd,
+          activityMins: summary.activityMins,
+          travelMins: summary.travelMins,
+          paceWarning: summary.paceWarning,
+        },
+      }
+    })
+
+    commitDays(next)
+    setTimingDone(true)
+    void usedGoogle // suppress unused warning
+  }
+
   // ── Auto-run: enrich + optimise before the final preview ──────────────────
   //
   // React 18 Strict Mode double-invokes effects: cleanup fires between run 1
@@ -428,6 +582,7 @@ export default function GeneratedItineraryPreview({
         setEnrichNote(r.done > 0 ? `Auto-verified ${r.done} place${r.done === 1 ? '' : 's'} with Google.` : 'Could not match places automatically — try “Resolve unverified”.')
         // Skip route optimisation if the effect was already cleaned up.
         if (!cancelled) await optimiseAllDays()
+        if (!cancelled) await enrichTiming()
       } catch {
         // swallow; loading state is cleared in finally regardless
       } finally {
@@ -650,6 +805,25 @@ export default function GeneratedItineraryPreview({
                 ) : null}
               </div>
 
+              {/* Phase 16E — day timing summary */}
+              {d._timingSummary && (
+                <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-2 text-[11px] text-gray-500">
+                  <span className="inline-flex items-center gap-1">
+                    <Clock size={11} className="text-violet-400" />
+                    Activities: {fmtMins(d._timingSummary.activityMins)}
+                  </span>
+                  {d._timingSummary.travelMins > 0 && (
+                    <span>Travel: {fmtMins(d._timingSummary.travelMins)}</span>
+                  )}
+                  <span className="font-semibold">Est. end: {d._timingSummary.dayEnd}</span>
+                  {d._timingSummary.paceWarning && (
+                    <span className="text-amber-600 flex items-center gap-0.5">
+                      <AlertTriangle size={10} /> {d._timingSummary.paceWarning}
+                    </span>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 {d.activities.map((act) => (
                   <ActivityRow
@@ -658,6 +832,11 @@ export default function GeneratedItineraryPreview({
                     days={editDays}
                     dayDate={d.date}
                     currency={currency}
+                    nextActivityTitle={(() => {
+                      const visibleActs = d.activities.filter((a) => !a._removed)
+                      const idx = visibleActs.findIndex((a) => a._key === act._key)
+                      return visibleActs[idx + 1]?.title
+                    })()}
                     onPatch={(u) => patch(d.date, act._key, u)}
                     onToggleRemove={() => toggleRemove(d.date, act._key)}
                     onMove={(toDate) => moveToDay(d.date, act._key, toDate)}
@@ -708,12 +887,13 @@ export default function GeneratedItineraryPreview({
 // ── Activity row ──────────────────────────────────────────────────────────────
 
 function ActivityRow({
-  act, days, dayDate, currency, onPatch, onToggleRemove, onMove,
+  act, days, dayDate, currency, nextActivityTitle, onPatch, onToggleRemove, onMove,
 }: {
   act: EditableGeneratedActivity
   days: EditableGeneratedDay[]
   dayDate: string
   currency: string
+  nextActivityTitle?: string
   onPatch: (u: Partial<EditableGeneratedActivity>) => void
   onToggleRemove: () => void
   onMove: (toDate: string) => void
@@ -755,6 +935,26 @@ function ActivityRow({
                   {act.spendConfidence === 'high' ? '' : ' (est.)'}
                 </span>
               )}
+            </div>
+          )}
+          {/* Phase 16E — planned timing */}
+          {act._plannedStart && act._durationMins != null && act._durationMins > 0 && (
+            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400">
+              <Clock size={9} className="flex-shrink-0" />
+              <span>{act._plannedStart} – {act._plannedEnd}</span>
+              <span className="text-gray-300">·</span>
+              <span>{fmtMins(act._durationMins)} stay</span>
+            </div>
+          )}
+          {act._travelToNextMins != null && nextActivityTitle && (
+            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-sky-600">
+              <Navigation2 size={9} className="flex-shrink-0" />
+              <span>
+                Next: {act._travelToNextDistText ?? fmtMins(act._travelToNextMins)}
+                {act._travelToNextDistKm ? ` / ${act._travelToNextDistKm}` : ''}
+                {` to ${nextActivityTitle}`}
+              </span>
+              {act._travelRouteSource === 'estimate' && <span className="text-gray-400">(est.)</span>}
             </div>
           )}
         </div>
