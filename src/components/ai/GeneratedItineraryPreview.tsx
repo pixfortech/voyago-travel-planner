@@ -32,7 +32,7 @@ import type {
   TripGeneratorResult, GeneratedActivity, ActivityCategory,
   PlaceSearchResult, OptimiseRouteResult, GeneratedDayRoute,
   BudgetInclusion, BudgetCategoryKey, PlannedTransport, PlannedStay,
-  ActivityContext, EssentialSuggestion, TimeZoneContext,
+  ActivityContext, EssentialSuggestion, TimeZoneContext, SuggestedFoodItem,
 } from '@/types'
 import { getDurationEstimate, buildDayTiming, fmtMins, parseHHMM } from '@/lib/ai/activityDuration'
 import type { TimingLeg } from '@/app/api/maps/itinerary-timing/route'
@@ -62,6 +62,8 @@ export interface EditableGeneratedActivity extends GeneratedActivity {
   _travelRouteSource?: 'google_routes' | 'estimate'
   // Phase 16F — location context (elevation / weather / AQI) + derived warnings
   _activityContext?: ActivityContext
+  // Phase 16D refinement — keys of suggested food items the user removed (excluded from budget)
+  _removedItemKeys?: string[]
 }
 export interface EditableGeneratedDay {
   date: string
@@ -1025,6 +1027,7 @@ export default function GeneratedItineraryPreview({
                     days={editDays}
                     dayDate={d.date}
                     currency={currency}
+                    travellerCount={travellerCount}
                     nextActivityTitle={(() => {
                       const visibleActs = d.activities.filter((a) => !a._removed)
                       const idx = visibleActs.findIndex((a) => a._key === act._key)
@@ -1077,15 +1080,100 @@ export default function GeneratedItineraryPreview({
   )
 }
 
+// ── Suggested food items (Phase 16D refinement) ───────────────────────────────
+
+/** Plain-language label for an item's price basis (PART 8 wording). */
+function itemBasisLabel(basis: SuggestedFoodItem['basis'], confidence: SuggestedFoodItem['confidence']): string {
+  switch (basis) {
+    case 'user_entered':
+      return 'Confirmed price'
+    case 'official_menu_or_website':
+      return 'Menu-based estimate'
+    case 'google_review_price_clues':
+      return 'Review-based estimate'
+    case 'google_price_level':
+      return 'Google price-level estimate'
+    case 'restaurant_type_city_heuristic':
+    default:
+      return confidence === 'low' ? 'Heuristic estimate' : 'Estimate'
+  }
+}
+
+function vegBadge(vegType: SuggestedFoodItem['vegType']): { label: string; cls: string } | null {
+  if (vegType === 'veg') return { label: 'Veg', cls: 'bg-green-50 text-green-600' }
+  if (vegType === 'vegan') return { label: 'Vegan', cls: 'bg-green-50 text-green-700' }
+  if (vegType === 'non_veg') return { label: 'Non-veg', cls: 'bg-red-50 text-red-500' }
+  return null
+}
+
+function itemKey(item: SuggestedFoodItem, idx: number): string {
+  return `${idx}:${item.name}`
+}
+
+/**
+ * Renders per-item price estimates with explicit basis labels + veg badges.
+ * Removable items are excluded from the activity's budget (estimatedCost is
+ * recomputed from remaining items × travellers when the user edits the set).
+ */
+function SuggestedItemsBlock({
+  items, removedKeys, currency, travellerCount, onToggleItem,
+}: {
+  items: SuggestedFoodItem[]
+  removedKeys: string[]
+  currency: string
+  travellerCount: number
+  onToggleItem: (key: string) => void
+}) {
+  if (!items.length) return null
+  const removed = new Set(removedKeys)
+  return (
+    <div className="mt-1.5 space-y-1">
+      <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Suggested items (est. prices)</p>
+      {items.map((item, idx) => {
+        const key = itemKey(item, idx)
+        const isRemoved = removed.has(key)
+        const badge = vegBadge(item.vegType)
+        return (
+          <div key={key} className={`flex items-center gap-1.5 text-[10px] ${isRemoved ? 'opacity-40' : ''}`}>
+            <button
+              type="button"
+              onClick={() => onToggleItem(key)}
+              className={`p-0.5 rounded ${isRemoved ? 'text-gray-400 hover:bg-gray-100' : 'text-red-400 hover:bg-red-50'}`}
+              title={isRemoved ? 'Add back (counts in budget)' : 'Remove (excluded from budget)'}
+            >
+              {isRemoved ? <RotateCcw size={9} /> : <Trash2 size={9} />}
+            </button>
+            <span className={`font-semibold text-gray-700 ${isRemoved ? 'line-through' : ''}`}>{item.name}</span>
+            {badge && <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>}
+            <span className="text-gray-500">
+              {formatCurrency(item.estimatedPriceMin, currency)}–{formatCurrency(item.estimatedPriceMax, currency)}/person
+            </span>
+            <span
+              className="text-[8px] font-semibold px-1 py-0.5 rounded-full bg-gray-100 text-gray-500"
+              title={item.sourceNote}
+            >
+              {itemBasisLabel(item.basis, item.confidence)}
+            </span>
+          </div>
+        )
+      })}
+      <p className="text-[9px] text-gray-400">
+        Prices are estimates — verify in person. {travellerCount > 1 ? `Per-person × ${travellerCount} travellers.` : ''}
+      </p>
+    </div>
+  )
+}
+
 // ── Activity row ──────────────────────────────────────────────────────────────
 
 function ActivityRow({
-  act, days, dayDate, currency, nextActivityTitle, onPatch, onToggleRemove, onMove,
+  act, days, dayDate, currency, travellerCount, nextActivityTitle, onPatch, onToggleRemove, onMove,
 }: {
   act: EditableGeneratedActivity
   days: EditableGeneratedDay[]
   dayDate: string
   currency: string
+  travellerCount: number
   nextActivityTitle?: string
   onPatch: (u: Partial<EditableGeneratedActivity>) => void
   onToggleRemove: () => void
@@ -1118,17 +1206,58 @@ function ActivityRow({
           </div>
           {/* Phase 16D — restaurant suggestion for food breaks */}
           {act.restaurantSuggestion && act.category === 'food' && (
-            <div className="mt-1 text-[10px] text-emerald-700 flex items-center gap-1 flex-wrap">
-              <ShieldCheck size={9} className="flex-shrink-0" />
-              <span className="font-semibold">{act.restaurantSuggestion.name}</span>
-              {act.restaurantSuggestion.rating != null && <span className="text-gray-400">★{act.restaurantSuggestion.rating}</span>}
-              {act.estimatedSpendRange && (
-                <span className="text-gray-500">
-                  · ≈{formatCurrency(act.estimatedSpendRange.perPersonMin, currency)}–{formatCurrency(act.estimatedSpendRange.perPersonMax, currency)}/person
-                  {act.spendConfidence === 'high' ? '' : ' (est.)'}
-                </span>
+            <>
+              <div className="mt-1 text-[10px] text-emerald-700 flex items-center gap-1 flex-wrap">
+                <ShieldCheck size={9} className="flex-shrink-0" />
+                <span className="font-semibold">{act.restaurantSuggestion.name}</span>
+                {act.restaurantSuggestion.rating != null && <span className="text-gray-400">★{act.restaurantSuggestion.rating}</span>}
+                {act.estimatedSpendRange && (
+                  <span className="text-gray-500">
+                    · ≈{formatCurrency(act.estimatedSpendRange.perPersonMin, currency)}–{formatCurrency(act.estimatedSpendRange.perPersonMax, currency)}/person
+                    {act.spendConfidence === 'high' ? '' : ' (est.)'}
+                  </span>
+                )}
+              </div>
+              {act.menuSourceUrl && (
+                <a
+                  href={act.menuSourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-0.5 inline-block text-[9px] text-sky-600 hover:underline"
+                  title="Opens the restaurant's official website in a new tab"
+                >
+                  Menu/website available — prices still shown as estimates unless parsed confidently.
+                </a>
               )}
-            </div>
+              {act.suggestedItems && act.suggestedItems.length > 0 && (
+                <SuggestedItemsBlock
+                  items={act.suggestedItems}
+                  removedKeys={act._removedItemKeys ?? []}
+                  currency={currency}
+                  travellerCount={travellerCount}
+                  onToggleItem={(key) => {
+                    const current = act._removedItemKeys ?? []
+                    const nextRemoved = current.includes(key)
+                      ? current.filter((k) => k !== key)
+                      : [...current, key]
+                    // Recompute estimatedCost from remaining items × travellers so
+                    // removed options no longer count in the budget.
+                    const removedSet = new Set(nextRemoved)
+                    const items = act.suggestedItems ?? []
+                    const perPersonMid = items.reduce((sum, it, idx) => {
+                      if (removedSet.has(itemKey(it, idx))) return sum
+                      return sum + (it.estimatedPriceMin + it.estimatedPriceMax) / 2
+                    }, 0)
+                    const n = Math.max(1, travellerCount)
+                    onPatch({
+                      _removedItemKeys: nextRemoved,
+                      estimatedCost: Math.round(perPersonMid * n),
+                      estimatedCostPerPerson: Math.round(perPersonMid),
+                    })
+                  }}
+                />
+              )}
+            </>
           )}
           {/* Phase 16E — planned timing */}
           {act._plannedStart && act._durationMins != null && act._durationMins > 0 && (

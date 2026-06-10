@@ -1006,6 +1006,9 @@ export default function NewTripAiGeneratorPage() {
           spendConfidence: patch.spendConfidence,
           spendBasis: patch.spendBasis,
           reasonTags: patch.reasonTags,
+          suggestedItems: patch.suggestedItems,
+          menuSourceUrl: patch.menuSourceUrl,
+          menuSourceType: patch.menuSourceType,
           // Keep the AI cost estimate unless we have a better range-based figure.
           estimatedCost: patch.estimatedSpendRange.min > 0 ? Math.round((patch.estimatedSpendRange.min + patch.estimatedSpendRange.max) / 2) : act.estimatedCost,
           estimatedCostPerPerson: patch.estimatedSpendRange.perPersonMin > 0

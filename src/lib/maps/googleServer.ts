@@ -247,6 +247,101 @@ export async function searchPlaces(
     }))
 }
 
+// ── Places (New) Place Details ───────────────────────────────────────────────
+
+/**
+ * Trimmed Place Details result. Only the fields we explicitly request are
+ * populated — we ask for the minimum needed to derive price/menu clues so the
+ * call stays cheap. `reviews` text is used internally for safe price-clue
+ * scanning only; we never display long review text.
+ */
+export interface PlaceDetailsResult {
+  placeId: string
+  name: string
+  address?: string
+  rating?: number
+  userRatingsTotal?: number
+  priceLevel?: number
+  types?: string[]
+  /** Official website / menu URL when Google provides one (never scraped here). */
+  websiteUri?: string
+  businessStatus?: string
+  openNow?: boolean
+  /** Review snippets — internal price-clue scanning only; not for display. */
+  reviews?: Array<{ text: string; rating?: number }>
+}
+
+interface RawPlaceDetails {
+  id?: string
+  displayName?: { text?: string }
+  formattedAddress?: string
+  rating?: number
+  userRatingCount?: number
+  priceLevel?: string
+  types?: string[]
+  websiteUri?: string
+  businessStatus?: string
+  regularOpeningHours?: { openNow?: boolean }
+  reviews?: Array<{ text?: { text?: string }; rating?: number }>
+}
+
+// Minimal field mask — only what we need for price/menu clues. Keeps cost down.
+const PLACE_DETAILS_FIELD_MASK =
+  'id,displayName,formattedAddress,rating,userRatingCount,priceLevel,types,websiteUri,businessStatus,regularOpeningHours.openNow,reviews.text.text,reviews.rating'
+
+/**
+ * Fetch Place Details for a single place. Fails soft: returns `null` on any
+ * error so callers degrade to search-only data rather than breaking enrichment.
+ * Intended for the SELECTED/top candidate only — never every search result.
+ */
+export async function fetchPlaceDetails(placeId: string): Promise<PlaceDetailsResult | null> {
+  const key = getServerMapsKey()
+  if (!key || !placeId) return null
+
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+      method: 'GET',
+      headers: {
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': PLACE_DETAILS_FIELD_MASK,
+      },
+      cache: 'no-store',
+    })
+    if (!res.ok) {
+      const env = (await res.json().catch(() => null)) as GoogleErrorEnvelope | null
+      console.error('[Voyago Maps] places:get (details) failed', {
+        httpStatus: res.status,
+        googleStatus: env?.error?.status ?? null,
+        googleMessage: env?.error?.message ?? null,
+      })
+      return null
+    }
+    const p = (await res.json()) as RawPlaceDetails
+    if (!p.id) return null
+    const reviews = Array.isArray(p.reviews)
+      ? p.reviews
+          .map((r) => ({ text: r.text?.text ?? '', rating: typeof r.rating === 'number' ? r.rating : undefined }))
+          .filter((r) => r.text)
+      : undefined
+    return {
+      placeId: p.id,
+      name: p.displayName?.text ?? 'Unnamed place',
+      address: p.formattedAddress || undefined,
+      rating: typeof p.rating === 'number' ? p.rating : undefined,
+      userRatingsTotal: typeof p.userRatingCount === 'number' ? p.userRatingCount : undefined,
+      priceLevel: p.priceLevel ? PRICE_LEVEL_MAP[p.priceLevel] : undefined,
+      types: Array.isArray(p.types) ? p.types : undefined,
+      websiteUri: p.websiteUri || undefined,
+      businessStatus: p.businessStatus || undefined,
+      openNow: p.regularOpeningHours?.openNow,
+      reviews,
+    }
+  } catch (err) {
+    console.error('[Voyago Maps] places:get (details) threw', { message: err instanceof Error ? err.message : String(err) })
+    return null
+  }
+}
+
 // ── Google Routes API — shared helpers ──────────────────────────────────────
 
 /** Maps our TravelMode enum to the Routes API enum value. */

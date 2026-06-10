@@ -1479,6 +1479,38 @@ export interface TripGeneratorInput {
 
 export type ActivityPriority = 'must' | 'recommended' | 'optional'
 
+// ── Phase 16D refinement — menu/review-aware suggested food items ────────────
+
+/** Where a suggested item's price estimate came from (most → least reliable). */
+export type SuggestedFoodItemBasis =
+  | 'official_menu_or_website'
+  | 'google_review_price_clues'
+  | 'google_price_level'
+  | 'restaurant_type_city_heuristic'
+  | 'user_entered'
+  | 'unknown'
+
+/**
+ * A single suggested food/drink item with a price estimate. Prices are
+ * approximate — `confidence` and `basis` make the source explicit so the UI
+ * never overstates accuracy. Item names are generic dish ideas (never scraped
+ * menu text); restaurant names remain Google-backed.
+ */
+export interface SuggestedFoodItem {
+  name: string
+  category: 'food' | 'drink' | 'dessert' | 'snack'
+  vegType?: 'veg' | 'non_veg' | 'vegan' | 'unknown'
+  estimatedPriceMin: number
+  estimatedPriceMax: number
+  /** Trip currency code (India-first; usually 'INR'). */
+  currency: string
+  confidence: 'high' | 'medium' | 'low'
+  basis: SuggestedFoodItemBasis
+  /** Short plain-language note, e.g. "Estimated from Google price level and restaurant type." */
+  sourceNote?: string
+}
+
+
 // ── Phase 16F — location context enrichment (elevation / weather / AQI / time zone) ──
 
 /** Weather context for a place at a planned date/time. All numbers optional. */
@@ -1598,9 +1630,14 @@ export interface GeneratedActivity {
   /** Estimated spend for this food break (approximate; based on Google price level or heuristic). */
   estimatedSpendRange?: { min: number; max: number; perPersonMin: number; perPersonMax: number }
   spendConfidence?: 'low' | 'medium' | 'high'
-  spendBasis?: 'google_price_level' | 'heuristic'
+  spendBasis?: 'google_price_level' | 'heuristic' | 'google_review_price_clues' | 'official_menu_or_website'
   /** Short reason tags explaining the suggestion (e.g. "Google-verified", "Budget-friendly"). */
   reasonTags?: string[]
+  /** Phase 16D refinement — per-item price estimates with explicit source + confidence. */
+  suggestedItems?: SuggestedFoodItem[]
+  /** Menu/website URL from Google Place Details (never scraped — shown as a link only). */
+  menuSourceUrl?: string
+  menuSourceType?: 'google_place_website' | 'google_place_menu' | 'unknown'
   // Phase 16F — location context (elevation / weather / AQI / time zone). Optional.
   activityContext?: ActivityContext
 }
