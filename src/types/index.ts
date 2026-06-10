@@ -1437,8 +1437,15 @@ export interface TripGeneratorInput {
   /**
    * Phase 15D — known hotel/homestay/area the group is staying at, used as the
    * daily route base. Free text (never personal data). Optional.
+   * Superseded by `accommodation` in Phase 16B but kept for backward compat.
    */
   stayBase?: string
+  /**
+   * Phase 16B — structured stay context for base-aware planning. When
+   * `chosen` + `googleVerified`, the AI must anchor each day's start/end to the
+   * stay's lat/lng and must not ask for stay again.
+   */
+  accommodation?: TripGeneratorAccommodation
 }
 
 export type ActivityPriority = 'must' | 'recommended' | 'optional'
@@ -1574,6 +1581,63 @@ export interface PlannedStay {
   lat?: number
   lng?: number
   placeId?: string
+}
+
+// ── Phase 16B — unified accommodation intake (single stay flow) ──────────────
+
+export type StayType = 'hotel' | 'homestay' | 'resort' | 'apartment' | 'relatives_home' | 'other'
+export type StayMealPlan = 'none' | 'breakfast' | 'breakfast_dinner' | 'all_meals' | 'custom'
+export type StayCostMode = 'total' | 'per_night' | 'unknown'
+/** How the user answered the single stay question. */
+export type StayChoice = 'chosen' | 'suggest' | 'later'
+
+/**
+ * Full accommodation draft collected ONCE in the new-trip AI generator.
+ * When `mode === 'chosen'` the user has booked a stay; a Google Places match
+ * (googleVerified) gives an exact lat/lng used as the trip's daily route base.
+ * When `mode === 'suggest'` they want the AI to recommend a stay area.
+ * When `mode === 'later'` no base is fixed.
+ */
+export interface AccommodationDraft {
+  /** Tri-state UI selection; `chosen` mirrors `mode === 'chosen'`. */
+  mode: StayChoice
+  chosen: boolean
+  name?: string
+  type?: StayType
+  placeId?: string
+  address?: string
+  lat?: number
+  lng?: number
+  rating?: number
+  userRatingsTotal?: number
+  types?: string[]
+  googleVerified?: boolean
+  checkInDate?: string
+  checkInTime?: string
+  checkOutDate?: string
+  checkOutTime?: string
+  costMode?: StayCostMode
+  costAmount?: number
+  rooms?: number
+  travellers?: number
+  mealsIncluded?: StayMealPlan
+  mealsCustomNote?: string
+  notes?: string
+  /** Preferred area when no exact stay is chosen (suggest mode). */
+  areaPreference?: string
+}
+
+/** Privacy-safe accommodation context sent to the AI generator. */
+export interface TripGeneratorAccommodation {
+  chosen: boolean
+  name?: string
+  type?: StayType
+  address?: string
+  lat?: number
+  lng?: number
+  googleVerified?: boolean
+  /** Preferred stay area when no exact stay is chosen. */
+  areaPreference?: string
 }
 
 /** Compact per-day road-route summary shown in the generated preview. */

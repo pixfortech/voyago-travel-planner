@@ -80,6 +80,38 @@ function compositionLine(input: TripGeneratorInput): string {
   return c.notes ? `${base}. Notes: ${c.notes}` : base
 }
 
+/**
+ * Build the stay/base block from structured accommodation (Phase 16B) with a
+ * fallback to the legacy free-text stayBase (Phase 15D). Returns '' when no
+ * stay context is provided.
+ */
+function stayContextBlock(input: TripGeneratorInput): string {
+  const acc = input.accommodation
+  if (acc?.chosen) {
+    const where = [acc.name, acc.address].filter(Boolean).join(', ') || acc.name || input.stayBase || 'the chosen stay'
+    const coords = acc.lat != null && acc.lng != null ? ` (coordinates ${acc.lat.toFixed(5)}, ${acc.lng.toFixed(5)})` : ''
+    const verified = acc.googleVerified
+      ? 'This stay is GOOGLE-VERIFIED — treat its location as exact.'
+      : 'This stay location is approximate.'
+    const kind = acc.type ? ` It is a ${acc.type.replace('_', ' ')}.` : ''
+    return `CONFIRMED STAY / TRIP BASE: The traveller is staying at "${where}"${coords}.${kind} ${verified}
+- Use this stay as the fixed base: START and END each day here.
+- Order each day's stops to minimise travel from and back to this base.
+- Do NOT ask the user for stay/hotel details — it is already chosen.
+- Mention this stay as the base in the trip summary.`
+  }
+  if (acc && !acc.chosen && acc.areaPreference) {
+    return `STAY NOT BOOKED — preferred area: "${acc.areaPreference}".
+- You MAY suggest 1–2 suitable stay areas/neighbourhoods near this preference (as search-friendly names only).
+- Do NOT claim any specific hotel is booked, available, or priced. Frame stay suggestions as options to verify.`
+  }
+  if (acc && !acc.chosen) {
+    return `STAY NOT BOOKED YET. You may suggest suitable stay areas as options, but must NOT claim any hotel is booked or confirmed.`
+  }
+  // Legacy fallback.
+  return input.stayBase ? `Stay / base location (start & end each day near here): ${input.stayBase}` : ''
+}
+
 export function buildTripGeneratorUserMessage(input: TripGeneratorInput): string {
   const p = input.preferences
   const existing = input.existingDays?.length
@@ -97,7 +129,7 @@ Today: ${input.today}
 Trip type: ${input.tripType}
 Travellers: ${input.travellerCount} total — ${compositionLine(input)}
 Budget: ${input.currency} ${input.budget > 0 ? input.budget : 'not specified'} (total for the group)
-${input.stayBase ? `Stay / base location (start & end each day near here): ${input.stayBase}` : ''}
+${stayContextBlock(input)}
 Pace: ${p.pace}
 Interests: ${p.interests.length ? p.interests.join(', ') : 'general sightseeing'}
 Food preferences: ${p.foodPreferences.length ? p.foodPreferences.join(', ') : 'no specific preference'}
