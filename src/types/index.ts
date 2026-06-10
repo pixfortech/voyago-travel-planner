@@ -1406,6 +1406,8 @@ export interface TripGenerationPreferences {
   mustVisit: string[]
   avoidPlaces: string[]
   extraNotes?: string
+  /** Phase 16D — food budget style for restaurant suggestions (budget/mid_range/premium). */
+  foodBudgetStyle?: 'budget' | 'mid_range' | 'premium'
 }
 
 /** A compact summary of one existing itinerary day, for generator context. */
@@ -1485,6 +1487,25 @@ export interface GeneratedActivity {
    * place and the candidate must be resolved via Google Places before applying.
    */
   needsVerification?: boolean
+  // ── Phase 16D — Google-backed food suggestions (optional, food activities only) ──
+  /** Meal type — helps the enrichment step pick the right search query. */
+  mealType?: 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'cafe'
+  /** Top Google-verified restaurant/café suggestion for this food break. */
+  restaurantSuggestion?: {
+    placeId: string
+    name: string
+    address?: string
+    rating?: number
+    priceLevel?: number
+    lat: number
+    lng: number
+  }
+  /** Estimated spend for this food break (approximate; based on Google price level or heuristic). */
+  estimatedSpendRange?: { min: number; max: number; perPersonMin: number; perPersonMax: number }
+  spendConfidence?: 'low' | 'medium' | 'high'
+  spendBasis?: 'google_price_level' | 'heuristic'
+  /** Short reason tags explaining the suggestion (e.g. "Google-verified", "Budget-friendly"). */
+  reasonTags?: string[]
 }
 
 /** A proposed day in the generated plan. */

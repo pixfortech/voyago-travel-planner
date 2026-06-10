@@ -743,6 +743,20 @@ function ActivityRow({
             {act._autoCategory && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-500">Auto-category</span>}
             {act._placeRating != null && <span className="text-[9px] text-gray-400">★ {act._placeRating}{act._placeUserRatings ? ` (${act._placeUserRatings})` : ''}</span>}
           </div>
+          {/* Phase 16D — restaurant suggestion for food breaks */}
+          {act.restaurantSuggestion && act.category === 'food' && (
+            <div className="mt-1 text-[10px] text-emerald-700 flex items-center gap-1 flex-wrap">
+              <ShieldCheck size={9} className="flex-shrink-0" />
+              <span className="font-semibold">{act.restaurantSuggestion.name}</span>
+              {act.restaurantSuggestion.rating != null && <span className="text-gray-400">★{act.restaurantSuggestion.rating}</span>}
+              {act.estimatedSpendRange && (
+                <span className="text-gray-500">
+                  · ≈{formatCurrency(act.estimatedSpendRange.perPersonMin, currency)}–{formatCurrency(act.estimatedSpendRange.perPersonMax, currency)}/person
+                  {act.spendConfidence === 'high' ? '' : ' (est.)'}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <input
           type="number" min="0"

@@ -24,11 +24,12 @@ import { type IndiaRailwayStation, searchRailwayStations } from '@/data/indiaRai
 import { type IndiaAirport, searchAirports } from '@/data/indiaAirports'
 import type {
   TripType, TripGenerationPreferences, TripInterest, FoodPreference,
-  TravelPace, TripGeneratorInput, TripGeneratorResult, Activity,
+  TravelPace, TripGeneratorInput, TripGeneratorResult, GeneratedActivity, Activity,
   BudgetInclusion, BudgetCategoryKey, PlannedTransport, PlannedStay,
   AccommodationDraft, StayType, StayMealPlan, StayCostMode, StayChoice,
   TripGeneratorAccommodation, StructuredDestination, RailwayStationRef, AirportRef,
 } from '@/types'
+import type { FoodEnrichmentPatch } from '@/app/api/ai/enrich-food/route'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,12 @@ const FOOD_PREFS: { value: FoodPreference; label: string }[] = [
   { value: 'cafe_hopping', label: 'Café Hopping' },
   { value: 'fine_dining',  label: 'Fine Dining' },
   { value: 'street_food',  label: 'Street Food' },
+]
+
+const FOOD_BUDGET_STYLES: { value: NonNullable<TripGenerationPreferences['foodBudgetStyle']>; label: string }[] = [
+  { value: 'budget',    label: 'Budget / street food' },
+  { value: 'mid_range', label: 'Mid-range' },
+  { value: 'premium',   label: 'Premium / fine dining' },
 ]
 
 const PACES: { value: TravelPace; label: string; desc: string }[] = [
@@ -490,6 +497,7 @@ export default function NewTripAiGeneratorPage() {
   const [genError, setGenError] = useState<string | null>(null)
   const [result, setResult] = useState<TripGeneratorResult | null>(null)
   const [isMock, setIsMock] = useState(false)
+  const [enrichingFood, setEnrichingFood] = useState(false)
 
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -705,13 +713,83 @@ export default function NewTripAiGeneratorPage() {
         return
       }
       const data = await res.json() as { result: TripGeneratorResult; isMock: boolean }
-      setResult(data.result)
+      let enrichedResult = data.result
+
+      // Phase 16D — enrich food breaks with Google Places suggestions.
+      // Only runs when Maps is available and it's not a mock result.
+      if (mapsStatus.available && !data.isMock) {
+        setEnrichingFood(true)
+        try {
+          const foodActivities: Array<{ dayIdx: number; actIdx: number; title: string; mealType?: string; suggestedPlaceSearchQuery?: string; isBreak?: boolean }> = []
+          for (let di = 0; di < data.result.dayPlans.length; di++) {
+            const day = data.result.dayPlans[di]!
+            for (let ai = 0; ai < day.activities.length; ai++) {
+              const a = day.activities[ai]!
+              if (a.category === 'food') {
+                foodActivities.push({ dayIdx: di, actIdx: ai, title: a.title, mealType: a.mealType, suggestedPlaceSearchQuery: a.suggestedPlaceSearchQuery ?? undefined, isBreak: a.isBreak })
+              }
+            }
+          }
+          if (foodActivities.length > 0) {
+            const efRes = await fetch('/api/ai/enrich-food', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                destination: brief.destination.trim(),
+                travellerCount: brief.travellerCount,
+                currency: brief.currency,
+                foodPreferences: brief.preferences.foodPreferences,
+                foodBudgetStyle: brief.preferences.foodBudgetStyle,
+                foodActivities,
+              }),
+            })
+            if (efRes.ok) {
+              const efData = await efRes.json() as { available: boolean; patches: FoodEnrichmentPatch[] }
+              if (efData.available && efData.patches.length > 0) {
+                enrichedResult = applyFoodEnrichmentPatches(data.result, efData.patches)
+              }
+            }
+          }
+        } catch {
+          // Food enrichment is best-effort; don't block the preview on failure.
+        } finally {
+          setEnrichingFood(false)
+        }
+      }
+
+      setResult(enrichedResult)
       setIsMock(data.isMock)
       setStage('preview')
     } catch {
       setGenError('Could not reach the server. Check your connection and try again.')
       setStage('review-brief')
     }
+  }
+
+  /** Apply food enrichment patches from the server onto a TripGeneratorResult. */
+  function applyFoodEnrichmentPatches(result: TripGeneratorResult, patches: FoodEnrichmentPatch[]): TripGeneratorResult {
+    const dayPlans = result.dayPlans.map((day, di) => ({
+      ...day,
+      activities: day.activities.map((act, ai) => {
+        const patch = patches.find((p) => p.dayIdx === di && p.actIdx === ai)
+        if (!patch) return act
+        const enriched: GeneratedActivity = {
+          ...act,
+          restaurantSuggestion: patch.restaurantSuggestion,
+          estimatedSpendRange: patch.estimatedSpendRange,
+          spendConfidence: patch.spendConfidence,
+          spendBasis: patch.spendBasis,
+          reasonTags: patch.reasonTags,
+          // Keep the AI cost estimate unless we have a better range-based figure.
+          estimatedCost: patch.estimatedSpendRange.min > 0 ? Math.round((patch.estimatedSpendRange.min + patch.estimatedSpendRange.max) / 2) : act.estimatedCost,
+          estimatedCostPerPerson: patch.estimatedSpendRange.perPersonMin > 0
+            ? Math.round((patch.estimatedSpendRange.perPersonMin + patch.estimatedSpendRange.perPersonMax) / 2)
+            : act.estimatedCostPerPerson,
+        }
+        return enriched
+      }),
+    }))
+    return { ...result, dayPlans }
   }
 
   // ── Create Trip ────────────────────────────────────────────────────────
@@ -752,6 +830,22 @@ export default function NewTripAiGeneratorPage() {
             if (a.routeNotes) noteParts.push(a.routeNotes)
             noteParts.push('(AI Trip Generator)')
             if (a._placeId) verified++; else unverified++
+            // Phase 16D — persist restaurant suggestion as foodInsight so it
+            // shows up in the food intelligence panel without extra Firestore fields.
+            const foodInsightFromSuggestion = a.restaurantSuggestion && a.category === 'food'
+              ? {
+                  placeId: a.restaurantSuggestion.placeId,
+                  placeName: a.restaurantSuggestion.name,
+                  placeAddress: a.restaurantSuggestion.address,
+                  rating: a.restaurantSuggestion.rating,
+                  priceLevel: a.restaurantSuggestion.priceLevel,
+                  estimatedCostPerPersonMin: a.estimatedSpendRange?.perPersonMin,
+                  estimatedCostPerPersonMax: a.estimatedSpendRange?.perPersonMax,
+                  confidence: (a.spendConfidence ?? 'low') as 'low' | 'medium' | 'high',
+                  source: 'google_places' as const,
+                  updatedAt: new Date().toISOString(),
+                }
+              : undefined
             return stripUndefined({
               id: `ai-${day.id}-${Math.random().toString(36).slice(2, 9)}`,
               type: categoryToActivityType(a.category),
@@ -776,6 +870,7 @@ export default function NewTripAiGeneratorPage() {
               lat: a._lat,
               lng: a._lng,
               suggestedCategorySource: a._autoCategory ? ('google_place_type' as const) : undefined,
+              foodInsight: foodInsightFromSuggestion,
               updatedAt: new Date().toISOString(),
             }) as Activity
           })
@@ -1372,6 +1467,21 @@ export default function NewTripAiGeneratorPage() {
               </div>
 
               <div>
+                <p className="text-sm font-medium text-gray-700 mb-1">Food budget style</p>
+                <p className="text-xs text-gray-400 mb-2">Used to find matching restaurant suggestions from Google</p>
+                <div className="flex flex-wrap gap-2">
+                  {FOOD_BUDGET_STYLES.map((s) => (
+                    <Chip
+                      key={s.value}
+                      label={s.label}
+                      active={brief.preferences.foodBudgetStyle === s.value}
+                      onClick={() => setPrefs({ foodBudgetStyle: brief.preferences.foodBudgetStyle === s.value ? undefined : s.value })}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Must-visit places (comma-separated)</label>
                 <textarea rows={2} placeholder="e.g. Amber Fort, Jantar Mantar" value={brief.preferences.mustVisit.join(', ')} onChange={(e) => setPrefs({ mustVisit: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} className={taClass} />
               </div>
@@ -1525,13 +1635,16 @@ export default function NewTripAiGeneratorPage() {
               <Loader2 size={28} className="text-white animate-spin" />
             </div>
             <div className="text-center">
-              <p className="text-base font-bold text-gray-900">Generating your itinerary…</p>
+              <p className="text-base font-bold text-gray-900">
+                {enrichingFood ? 'Finding restaurant suggestions…' : 'Generating your itinerary…'}
+              </p>
               <p className="text-sm text-gray-500 mt-1">
-                Creating a {brief.startDate && brief.endDate ? getDayCount(brief.startDate, brief.endDate) : '?'}-day plan
-                {brief.destination ? ` for ${brief.destination}` : ''}
+                {enrichingFood
+                  ? 'Matching food breaks with Google Places'
+                  : `Creating a ${brief.startDate && brief.endDate ? getDayCount(brief.startDate, brief.endDate) : '?'}-day plan${brief.destination ? ` for ${brief.destination}` : ''}`}
               </p>
             </div>
-            <p className="text-xs text-gray-400">This usually takes 10–20 seconds</p>
+            <p className="text-xs text-gray-400">This usually takes 10–25 seconds</p>
           </div>
         )}
 

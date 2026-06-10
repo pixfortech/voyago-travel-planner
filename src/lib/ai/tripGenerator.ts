@@ -113,6 +113,24 @@ function stayContextBlock(input: TripGeneratorInput): string {
 }
 
 /**
+ * Build the food preferences/context block (Phase 16D). Tells the AI about
+ * food budget style and instructs it to use generic meal-break titles (not
+ * invented restaurant names) so the enrichment step can replace them with
+ * real Google Places results.
+ */
+function foodContextBlock(input: TripGeneratorInput): string {
+  const p = input.preferences
+  const lines: string[] = []
+  if (p.foodBudgetStyle) {
+    const label = p.foodBudgetStyle === 'budget' ? 'budget / street-food level' : p.foodBudgetStyle === 'premium' ? 'premium / fine-dining level' : 'mid-range'
+    lines.push(`Food budget style: ${label}.`)
+  }
+  lines.push('For meal breaks: use generic titles like "Lunch break", "Dinner break", "Breakfast break", "Café / snack break" — do NOT invent specific restaurant names as verified. Set "isBreak": true and "mealType" to one of: breakfast|lunch|dinner|snack|cafe.')
+  lines.push('Set "suggestedPlaceSearchQuery" for each meal break to a useful Google search, e.g. "vegetarian restaurant MG Marg Gangtok" or "café near Tsomgo Lake". This will be used to find a real restaurant via Google Places.')
+  return lines.join('\n')
+}
+
+/**
  * Build the structured destination block (Phase 16C). Anchors the AI to an
  * exact city/state, avoids same-name confusion, and passes nearest known
  * station/airport as geographic context only (never as bookings).
@@ -159,6 +177,7 @@ Pace: ${p.pace}
 Interests: ${p.interests.length ? p.interests.join(', ') : 'general sightseeing'}
 Food preferences: ${p.foodPreferences.length ? p.foodPreferences.join(', ') : 'no specific preference'}
 ${p.foodAvoid ? `Food to avoid / allergies (constraint, not a safety guarantee): ${p.foodAvoid}` : ''}
+${foodContextBlock(input)}
 Accommodation style: ${p.accommodationStyle ?? 'not specified'}
 Route preference: ${p.routePreference ?? 'balanced'}
 Constraints: ${p.constraints.length ? p.constraints.join('; ') : 'none'}
@@ -201,6 +220,7 @@ Return a JSON object exactly matching this shape:
           "priority": "must|recommended|optional",
           "needsVerification": false,
           "foodInsightNotes": "for food stops only",
+          "mealType": "breakfast|lunch|dinner|snack|cafe (food breaks only)",
           "routeNotes": "travel note to next stop",
           "whyRecommended": "why this fits the group",
           "timeToSpend": "e.g. 1–2 hrs",
@@ -281,6 +301,9 @@ function coerceActivity(raw: unknown): GeneratedActivity {
     timeToSpend: a.timeToSpend ? str(a.timeToSpend) : undefined,
     isBreak: Boolean(a.isBreak),
     needsVerification: a.needsVerification === true ? true : undefined,
+    mealType: (['breakfast', 'lunch', 'dinner', 'snack', 'cafe'] as const).includes(a.mealType as 'breakfast')
+      ? (a.mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'cafe')
+      : undefined,
   }
 }
 
