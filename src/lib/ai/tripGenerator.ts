@@ -85,6 +85,59 @@ function compositionLine(input: TripGeneratorInput): string {
 }
 
 /**
+ * Build transport context block. Context-only — AI must not claim confirmed
+ * bookings or invent PNR/ticket status.
+ */
+function transportContextBlock(input: TripGeneratorInput): string {
+  const t = input.transportContext
+  if (!t || !t.mode) return ''
+  const lines: string[] = []
+
+  const travelType = t.travelType === 'round_trip' ? 'round trip' : 'one-way'
+  const modeLabel = t.mode.replace('_', ' ')
+
+  // Outbound leg
+  let legDesc = `${travelType} by ${modeLabel}`
+  if (t.fromStation && t.toStation) {
+    legDesc += ` from ${t.fromStation.city} (${t.fromStation.code}) to ${t.toStation.city} (${t.toStation.code})`
+  } else if (t.fromAirport && t.toAirport) {
+    legDesc += ` from ${t.fromAirport.city} (${t.fromAirport.iataCode}) to ${t.toAirport.city} (${t.toAirport.iataCode})`
+  } else if (t.fromCity && t.toCity) {
+    legDesc += ` from ${t.fromCity} to ${t.toCity}`
+  }
+  lines.push(`TRANSPORT CONTEXT (user-provided, advisory only — do NOT invent ticket status or PNR):`)
+  lines.push(`Outbound: ${legDesc}.`)
+
+  if (t.trainNumber) {
+    const trainLabel = t.trainName ? `${t.trainName} (${t.trainNumber})` : `Train ${t.trainNumber}`
+    lines.push(`Train: ${trainLabel}.`)
+    if (t.trainRouteWarning) {
+      lines.push(`⚠ Route note: ${t.trainRouteWarning} Advise the user to verify this selection.`)
+    }
+  }
+
+  // Return leg
+  if (t.travelType === 'round_trip') {
+    let returnDesc = 'return leg'
+    if (t.returnFromStation && t.returnToStation) {
+      returnDesc = `return from ${t.returnFromStation.city} (${t.returnFromStation.code}) to ${t.returnToStation.city} (${t.returnToStation.code})`
+    } else if (t.returnFromAirport && t.returnToAirport) {
+      returnDesc = `return from ${t.returnFromAirport.city} (${t.returnFromAirport.iataCode}) to ${t.returnToAirport.city} (${t.returnToAirport.iataCode})`
+    } else if (t.returnFromCity && t.returnToCity) {
+      returnDesc = `return from ${t.returnFromCity} to ${t.returnToCity}`
+    }
+    lines.push(`Return: ${returnDesc}.`)
+    if (t.returnTrainNumber) {
+      const rl = t.returnTrainName ? `${t.returnTrainName} (${t.returnTrainNumber})` : `Train ${t.returnTrainNumber}`
+      lines.push(`Return train: ${rl}.`)
+    }
+  }
+
+  lines.push('Use transport context for geographic planning (e.g. plan arrival/departure day around the station/airport). Do NOT claim any ticket is booked or confirmed.')
+  return lines.join('\n')
+}
+
+/**
  * Build the stay/base block from structured accommodation (Phase 16B) with a
  * fallback to the legacy free-text stayBase (Phase 15D). Returns '' when no
  * stay context is provided.
@@ -169,6 +222,8 @@ export function buildTripGeneratorUserMessage(input: TripGeneratorInput): string
         .join('\n')
     : '(no existing activities)'
 
+  const transportCtx = transportContextBlock(input)
+
   return `Destination: ${input.destination}
 ${destinationContextBlock(input)}
 Dates: ${input.startDate} → ${input.endDate} (${input.dayCount} day(s))
@@ -177,7 +232,7 @@ Trip type: ${input.tripType}
 Travellers: ${input.travellerCount} total — ${compositionLine(input)}
 Budget: ${input.currency} ${input.budget > 0 ? input.budget : 'not specified'} (total for the group)
 ${stayContextBlock(input)}
-Pace: ${p.pace}
+${transportCtx ? `${transportCtx}\n` : ''}Pace: ${p.pace}
 Interests: ${p.interests.length ? p.interests.join(', ') : 'general sightseeing'}
 Food preferences: ${p.foodPreferences.length ? p.foodPreferences.join(', ') : 'no specific preference'}
 ${p.foodAvoid ? `Food to avoid / allergies (constraint, not a safety guarantee): ${p.foodAvoid}` : ''}

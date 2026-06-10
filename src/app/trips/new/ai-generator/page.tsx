@@ -22,12 +22,14 @@ import { categoryToActivityType } from '@/lib/maps/categoryMapping'
 import { type IndiaCity, searchCities } from '@/data/indiaCities'
 import { type IndiaRailwayStation, searchRailwayStations } from '@/data/indiaRailwayStations'
 import { type IndiaAirport, searchAirports } from '@/data/indiaAirports'
+import { type IndiaTrainData, searchTrains, validateTrainRoute } from '@/data/indiaTrains'
 import type {
   TripType, TripGenerationPreferences, TripInterest, FoodPreference,
   TravelPace, TripGeneratorInput, TripGeneratorResult, GeneratedActivity, Activity,
   BudgetInclusion, BudgetCategoryKey, PlannedTransport, PlannedStay,
   AccommodationDraft, StayType, StayMealPlan, StayCostMode, StayChoice,
   TripGeneratorAccommodation, StructuredDestination, RailwayStationRef, AirportRef,
+  TripTransportContext,
 } from '@/types'
 import type { FoodEnrichmentPatch } from '@/app/api/ai/enrich-food/route'
 
@@ -52,7 +54,9 @@ interface TripBrief {
   // Phase 16C — structured destination + nearest station/airport
   destinationStructured?: StructuredDestination
   destinationSource: 'dataset' | 'custom'
+  /** Nearest station to the destination — used as geographic context in AI prompt. */
   railwayStation?: RailwayStationRef
+  /** Nearest airport to the destination — used as geographic context in AI prompt. */
   airport?: AirportRef
   origin: string
   startDate: string
@@ -67,6 +71,30 @@ interface TripBrief {
   accommodation: AccommodationDraft
   budgetIncluded: BudgetInclusion
   transport: PlannedTransport
+  // Hotfix transport improvements — structured from/to + round trip + train validation
+  /** One-way or round-trip journey. */
+  transportTravelType: 'one_way' | 'round_trip'
+  // Train from/to structured selectors
+  fromStation?: RailwayStationRef
+  toStation?: RailwayStationRef
+  // Train number/name (optional — user may just enter a number without selecting from seed)
+  trainNumber?: string
+  trainName?: string
+  /** Route mismatch warning from local seed validation. Advisory only. */
+  trainRouteWarning?: string
+  // Flight from/to structured selectors
+  fromAirport?: AirportRef
+  toAirport?: AirportRef
+  // Bus/car/other: free-text city names (reuses transport.origin/destination)
+  // Return leg (round trip)
+  returnFromStation?: RailwayStationRef
+  returnToStation?: RailwayStationRef
+  returnFromAirport?: AirportRef
+  returnToAirport?: AirportRef
+  returnFromCity?: string
+  returnToCity?: string
+  returnTrainNumber?: string
+  returnTrainName?: string
 }
 
 const BUDGET_CATS: { key: BudgetCategoryKey; label: string }[] = [
@@ -191,6 +219,7 @@ function defaultBrief(): TripBrief {
       food: true, activities: true, shopping: true, buffer: true,
     },
     transport: { mode: 'train' },
+    transportTravelType: 'one_way',
   }
 }
 
@@ -582,6 +611,130 @@ export default function NewTripAiGeneratorPage() {
     setBrief((p) => ({ ...p, airport: { ...a, source: 'dataset' } }))
   }
 
+  // ── Transport structured selectors ─────────────────────────────────────
+
+  function revalidateTrainRoute(
+    p: TripBrief,
+    fromStation?: RailwayStationRef,
+    toStation?: RailwayStationRef,
+    trainNumber?: string,
+  ): string | undefined {
+    const fs = fromStation ?? p.fromStation
+    const ts = toStation ?? p.toStation
+    const tn = trainNumber ?? p.trainNumber
+    if (!fs || !ts || !tn) return undefined
+    return validateTrainRoute(tn, fs.code, fs.city, ts.code, ts.city) ?? undefined
+  }
+
+  function setFromStation(s: IndiaRailwayStation | null) {
+    setBrief((p) => {
+      const fs: RailwayStationRef | undefined = s ? { ...s, source: 'dataset' } : undefined
+      const warning = revalidateTrainRoute(p, fs, p.toStation, p.trainNumber)
+      return {
+        ...p,
+        fromStation: fs,
+        transport: { ...p.transport, origin: s ? s.city : p.transport.origin },
+        trainRouteWarning: warning,
+      }
+    })
+  }
+  function setFromStationCustom(name: string) {
+    setBrief((p) => ({
+      ...p,
+      fromStation: { name, code: '', city: name, state: '', source: 'custom' },
+      transport: { ...p.transport, origin: name },
+      trainRouteWarning: undefined,
+    }))
+  }
+  function clearFromStation() {
+    setBrief((p) => ({ ...p, fromStation: undefined, trainRouteWarning: undefined }))
+  }
+
+  function setToStation(s: IndiaRailwayStation | null) {
+    setBrief((p) => {
+      const ts: RailwayStationRef | undefined = s ? { ...s, source: 'dataset' } : undefined
+      const warning = revalidateTrainRoute(p, p.fromStation, ts, p.trainNumber)
+      return {
+        ...p,
+        toStation: ts,
+        // Also update nearestRailwayStation for AI geographic context.
+        railwayStation: ts ?? p.railwayStation,
+        transport: { ...p.transport, destination: s ? s.city : p.transport.destination },
+        trainRouteWarning: warning,
+      }
+    })
+  }
+  function setToStationCustom(name: string) {
+    setBrief((p) => ({
+      ...p,
+      toStation: { name, code: '', city: name, state: '', source: 'custom' },
+      transport: { ...p.transport, destination: name },
+      trainRouteWarning: undefined,
+    }))
+  }
+  function clearToStation() {
+    setBrief((p) => ({ ...p, toStation: undefined, trainRouteWarning: undefined }))
+  }
+
+  function selectTrain(t: IndiaTrainData) {
+    setBrief((p) => {
+      const warning = revalidateTrainRoute(p, p.fromStation, p.toStation, t.trainNumber)
+      return { ...p, trainNumber: t.trainNumber, trainName: t.trainName, trainRouteWarning: warning }
+    })
+  }
+  function setTrainNumberCustom(text: string) {
+    const num = text.trim()
+    setBrief((p) => {
+      const warning = revalidateTrainRoute(p, p.fromStation, p.toStation, num)
+      return { ...p, trainNumber: num, trainName: undefined, trainRouteWarning: warning }
+    })
+  }
+  function clearTrain() {
+    setBrief((p) => ({ ...p, trainNumber: undefined, trainName: undefined, trainRouteWarning: undefined }))
+  }
+
+  function setFromAirport(a: IndiaAirport | null) {
+    setBrief((p) => ({
+      ...p,
+      fromAirport: a ? { ...a, source: 'dataset' } : undefined,
+      transport: { ...p.transport, origin: a ? a.city : p.transport.origin },
+    }))
+  }
+  function setToAirport(a: IndiaAirport | null) {
+    setBrief((p) => ({
+      ...p,
+      toAirport: a ? { ...a, source: 'dataset' } : undefined,
+      airport: a ? { ...a, source: 'dataset' } : p.airport,
+      transport: { ...p.transport, destination: a ? a.city : p.transport.destination },
+    }))
+  }
+
+  function applyReverseReturn() {
+    setBrief((p) => {
+      if (p.transport.mode === 'train') {
+        return {
+          ...p,
+          returnFromStation: p.toStation,
+          returnToStation: p.fromStation,
+          returnTrainNumber: undefined,
+          returnTrainName: undefined,
+        }
+      }
+      if (p.transport.mode === 'flight') {
+        return {
+          ...p,
+          returnFromAirport: p.toAirport,
+          returnToAirport: p.fromAirport,
+        }
+      }
+      return {
+        ...p,
+        returnFromCity: p.transport.destination,
+        returnToCity: p.transport.origin,
+      }
+    })
+  }
+
   // ── Parse NL prompt → brief ────────────────────────────────────────────
 
   async function handleParsePrompt() {
@@ -688,6 +841,57 @@ export default function NewTripAiGeneratorPage() {
       ? { name: brief.airport.name, iataCode: brief.airport.iataCode, city: brief.airport.city, state: brief.airport.state }
       : undefined
 
+    // Build structured transport context for AI (PART 6).
+    const t = brief.transport
+    let transportContext: TripTransportContext | undefined
+    if (t.mode && t.mode !== 'other') {
+      const hasAny =
+        brief.fromStation || brief.toStation ||
+        brief.fromAirport || brief.toAirport ||
+        t.origin || t.destination
+      if (hasAny) {
+        transportContext = {
+          mode: t.mode,
+          travelType: brief.transportTravelType,
+          fromStation: brief.fromStation
+            ? { name: brief.fromStation.name, code: brief.fromStation.code, city: brief.fromStation.city, state: brief.fromStation.state }
+            : undefined,
+          toStation: brief.toStation
+            ? { name: brief.toStation.name, code: brief.toStation.code, city: brief.toStation.city, state: brief.toStation.state }
+            : undefined,
+          fromAirport: brief.fromAirport
+            ? { name: brief.fromAirport.name, iataCode: brief.fromAirport.iataCode, city: brief.fromAirport.city, state: brief.fromAirport.state }
+            : undefined,
+          toAirport: brief.toAirport
+            ? { name: brief.toAirport.name, iataCode: brief.toAirport.iataCode, city: brief.toAirport.city, state: brief.toAirport.state }
+            : undefined,
+          fromCity: t.mode === 'bus' || t.mode === 'car' ? (t.origin || undefined) : undefined,
+          toCity: t.mode === 'bus' || t.mode === 'car' ? (t.destination || undefined) : undefined,
+          trainNumber: brief.trainNumber || undefined,
+          trainName: brief.trainName || undefined,
+          trainRouteWarning: brief.trainRouteWarning || undefined,
+          ...(brief.transportTravelType === 'round_trip' ? {
+            returnFromStation: brief.returnFromStation
+              ? { name: brief.returnFromStation.name, code: brief.returnFromStation.code, city: brief.returnFromStation.city, state: brief.returnFromStation.state }
+              : undefined,
+            returnToStation: brief.returnToStation
+              ? { name: brief.returnToStation.name, code: brief.returnToStation.code, city: brief.returnToStation.city, state: brief.returnToStation.state }
+              : undefined,
+            returnFromAirport: brief.returnFromAirport
+              ? { name: brief.returnFromAirport.name, iataCode: brief.returnFromAirport.iataCode, city: brief.returnFromAirport.city, state: brief.returnFromAirport.state }
+              : undefined,
+            returnToAirport: brief.returnToAirport
+              ? { name: brief.returnToAirport.name, iataCode: brief.returnToAirport.iataCode, city: brief.returnToAirport.city, state: brief.returnToAirport.state }
+              : undefined,
+            returnFromCity: brief.returnFromCity || undefined,
+            returnToCity: brief.returnToCity || undefined,
+            returnTrainNumber: brief.returnTrainNumber || undefined,
+            returnTrainName: brief.returnTrainName || undefined,
+          } : {}),
+        }
+      }
+    }
+
     const input: TripGeneratorInput = {
       destination: brief.destination.trim(),
       startDate: brief.startDate,
@@ -708,6 +912,7 @@ export default function NewTripAiGeneratorPage() {
       destinationSource: brief.destinationSource,
       nearestRailwayStation,
       nearestAirport,
+      transportContext,
     }
 
     setGenError(null)
@@ -1574,6 +1779,7 @@ export default function NewTripAiGeneratorPage() {
               <p className="text-sm font-bold text-gray-800">Transport to destination (optional)</p>
               <p className="text-xs text-gray-500 -mt-2">Add transport you&apos;ve already arranged. Saved as a planned estimate — never as an actual expense.</p>
 
+              {/* Mode */}
               <div className="space-y-2">
                 <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">How are you getting there?</p>
                 <div className="flex gap-2 flex-wrap">
@@ -1584,52 +1790,222 @@ export default function NewTripAiGeneratorPage() {
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="From" placeholder="Origin" value={brief.transport.origin || ''} onChange={(e) => setTransport({ origin: e.target.value })} />
-                  <Input label="To" placeholder="Destination" value={brief.transport.destination || ''} onChange={(e) => setTransport({ destination: e.target.value })} />
-                </div>
+              </div>
 
-                {/* Phase 16C — arrival station/airport selector (geographic context;
-                    full transport budget arrives in Phase 16H). */}
-                {brief.transport.mode === 'train' && (
-                  <SearchableSelect<IndiaRailwayStation>
-                    label="Arrival railway station (optional)"
-                    placeholder="Search by name, code or city — e.g. NJP, Howrah"
-                    search={(q) => searchRailwayStations(q)}
-                    getKey={(s) => s.code}
-                    renderPrimary={(s) => `${s.name} (${s.code})`}
-                    renderSecondary={(s) => `${s.city}, ${s.state}`}
-                    onSelect={selectStation}
-                    selectedPrimary={brief.railwayStation ? `${brief.railwayStation.name} (${brief.railwayStation.code})` : null}
-                    selectedSecondary={brief.railwayStation ? `${brief.railwayStation.city}, ${brief.railwayStation.state}` : undefined}
-                    selectedBadge={brief.railwayStation?.source === 'dataset' ? 'Dataset' : 'Custom'}
-                    onClear={() => setBrief((p) => ({ ...p, railwayStation: undefined }))}
+              {/* Travel type: one-way / round-trip */}
+              <div className="flex gap-2">
+                {(['one_way', 'round_trip'] as const).map((tt) => (
+                  <button key={tt} type="button"
+                    onClick={() => setBrief((p) => ({ ...p, transportTravelType: tt }))}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${brief.transportTravelType === tt ? 'bg-violet-500 text-white border-violet-500' : 'bg-white text-gray-600 border-gray-200 hover:border-violet-300'}`}>
+                    {tt === 'one_way' ? 'One-way' : 'Round trip'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Train from/to + train selector */}
+              {brief.transport.mode === 'train' && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <SearchableSelect<IndiaRailwayStation>
+                      label="From station"
+                      placeholder="e.g. Howrah, SDAH, Kolkata"
+                      search={(q) => searchRailwayStations(q)}
+                      getKey={(s) => s.code || s.name}
+                      renderPrimary={(s) => `${s.name}${s.code ? ` (${s.code})` : ''}`}
+                      renderSecondary={(s) => `${s.city}, ${s.state}`}
+                      onSelect={(s) => setFromStation(s)}
+                      selectedPrimary={brief.fromStation ? `${brief.fromStation.name}${brief.fromStation.code ? ` (${brief.fromStation.code})` : ''}` : null}
+                      selectedSecondary={brief.fromStation ? `${brief.fromStation.city}, ${brief.fromStation.state}` : undefined}
+                      selectedBadge={brief.fromStation?.source === 'dataset' ? 'Dataset' : brief.fromStation ? 'Custom' : undefined}
+                      onClear={clearFromStation}
+                      allowCustom
+                      onCustom={setFromStationCustom}
+                    />
+                    <SearchableSelect<IndiaRailwayStation>
+                      label="To station (arrival)"
+                      placeholder="e.g. NJP, New Jalpaiguri"
+                      search={(q) => searchRailwayStations(q)}
+                      getKey={(s) => s.code || s.name}
+                      renderPrimary={(s) => `${s.name}${s.code ? ` (${s.code})` : ''}`}
+                      renderSecondary={(s) => `${s.city}, ${s.state}`}
+                      onSelect={(s) => setToStation(s)}
+                      selectedPrimary={brief.toStation ? `${brief.toStation.name}${brief.toStation.code ? ` (${brief.toStation.code})` : ''}` : null}
+                      selectedSecondary={brief.toStation ? `${brief.toStation.city}, ${brief.toStation.state}` : undefined}
+                      selectedBadge={brief.toStation?.source === 'dataset' ? 'Dataset' : brief.toStation ? 'Custom' : undefined}
+                      onClear={clearToStation}
+                      allowCustom
+                      onCustom={setToStationCustom}
+                    />
+                  </div>
+                  <SearchableSelect<IndiaTrainData>
+                    label="Train (optional)"
+                    placeholder="Search by number or name — e.g. 12377, Padatik"
+                    search={(q) => searchTrains(q)}
+                    getKey={(t) => t.trainNumber}
+                    renderPrimary={(t) => `${t.trainNumber} · ${t.trainName}`}
+                    renderSecondary={(t) => t.routeDescription}
+                    onSelect={selectTrain}
+                    selectedPrimary={brief.trainNumber ? `${brief.trainNumber}${brief.trainName ? ` · ${brief.trainName}` : ''}` : null}
+                    selectedSecondary={undefined}
+                    selectedBadge={brief.trainNumber ? 'Seed' : undefined}
+                    onClear={clearTrain}
                     allowCustom
-                    onCustom={(text) => setBrief((p) => ({ ...p, railwayStation: { name: text, code: '', city: '', state: '', source: 'custom' } }))}
+                    onCustom={setTrainNumberCustom}
                   />
-                )}
-                {brief.transport.mode === 'flight' && (
+                  {brief.trainRouteWarning && (
+                    <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 p-3">
+                      <AlertTriangle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-amber-700 leading-relaxed">{brief.trainRouteWarning}</p>
+                    </div>
+                  )}
+                  {brief.trainNumber && !brief.trainRouteWarning && (
+                    <p className="text-[11px] text-gray-400">Train data is from a small seed — always verify the route and availability at IRCTC before booking.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Flight from/to */}
+              {brief.transport.mode === 'flight' && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <SearchableSelect<IndiaAirport>
-                    label="Arrival airport (optional)"
-                    placeholder="Search by name, IATA or city — e.g. CCU, Bagdogra"
+                    label="From airport"
+                    placeholder="e.g. CCU, Kolkata, Netaji"
                     search={(q) => searchAirports(q)}
                     getKey={(a) => a.iataCode}
                     renderPrimary={(a) => `${a.name} (${a.iataCode})`}
                     renderSecondary={(a) => `${a.city}, ${a.state}`}
-                    onSelect={selectAirport}
-                    selectedPrimary={brief.airport ? `${brief.airport.name} (${brief.airport.iataCode})` : null}
-                    selectedSecondary={brief.airport ? `${brief.airport.city}, ${brief.airport.state}` : undefined}
-                    selectedBadge={brief.airport?.source === 'dataset' ? 'Dataset' : 'Custom'}
-                    onClear={() => setBrief((p) => ({ ...p, airport: undefined }))}
+                    onSelect={(a) => setFromAirport(a)}
+                    selectedPrimary={brief.fromAirport ? `${brief.fromAirport.name} (${brief.fromAirport.iataCode})` : null}
+                    selectedSecondary={brief.fromAirport ? `${brief.fromAirport.city}, ${brief.fromAirport.state}` : undefined}
+                    selectedBadge={brief.fromAirport?.source === 'dataset' ? 'Dataset' : brief.fromAirport ? 'Custom' : undefined}
+                    onClear={() => setBrief((p) => ({ ...p, fromAirport: undefined }))}
                     allowCustom
-                    onCustom={(text) => setBrief((p) => ({ ...p, airport: { name: text, iataCode: '', city: '', state: '', source: 'custom' } }))}
+                    onCustom={(text) => setBrief((p) => ({ ...p, fromAirport: { name: text, iataCode: '', city: text, state: '', source: 'custom' }, transport: { ...p.transport, origin: text } }))}
                   />
-                )}
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="Total cost (optional)" type="number" min="0" placeholder="0" value={brief.transport.totalCost ? String(brief.transport.totalCost) : ''} onChange={(e) => setTransport({ totalCost: parseFloat(e.target.value) || undefined })} />
-                  <Input label="Booking ref (optional)" placeholder="PNR / ref" value={brief.transport.bookingRef || ''} onChange={(e) => setTransport({ bookingRef: e.target.value })} />
+                  <SearchableSelect<IndiaAirport>
+                    label="To airport (arrival)"
+                    placeholder="e.g. IXB, Bagdogra"
+                    search={(q) => searchAirports(q)}
+                    getKey={(a) => a.iataCode}
+                    renderPrimary={(a) => `${a.name} (${a.iataCode})`}
+                    renderSecondary={(a) => `${a.city}, ${a.state}`}
+                    onSelect={(a) => setToAirport(a)}
+                    selectedPrimary={brief.toAirport ? `${brief.toAirport.name} (${brief.toAirport.iataCode})` : null}
+                    selectedSecondary={brief.toAirport ? `${brief.toAirport.city}, ${brief.toAirport.state}` : undefined}
+                    selectedBadge={brief.toAirport?.source === 'dataset' ? 'Dataset' : brief.toAirport ? 'Custom' : undefined}
+                    onClear={() => setBrief((p) => ({ ...p, toAirport: undefined }))}
+                    allowCustom
+                    onCustom={(text) => setBrief((p) => ({ ...p, toAirport: { name: text, iataCode: '', city: text, state: '', source: 'custom' }, airport: { name: text, iataCode: '', city: text, state: '', source: 'custom' }, transport: { ...p.transport, destination: text } }))}
+                  />
                 </div>
+              )}
+
+              {/* Bus/car/other: free-text */}
+              {(brief.transport.mode === 'bus' || brief.transport.mode === 'car' || brief.transport.mode === 'other') && (
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="From" placeholder="Origin city" value={brief.transport.origin || ''} onChange={(e) => setTransport({ origin: e.target.value })} />
+                  <Input label="To" placeholder="Destination city" value={brief.transport.destination || ''} onChange={(e) => setTransport({ destination: e.target.value })} />
+                </div>
+              )}
+
+              {/* Round-trip return leg */}
+              {brief.transportTravelType === 'round_trip' && (
+                <div className="space-y-3 pt-1 border-t border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Return journey</p>
+                    <button type="button" onClick={applyReverseReturn}
+                      className="text-[11px] font-semibold text-violet-600 hover:text-violet-700 transition-colors">
+                      ↔ Same route, reversed
+                    </button>
+                  </div>
+                  {brief.transport.mode === 'train' && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <SearchableSelect<IndiaRailwayStation>
+                          label="Return from"
+                          placeholder="e.g. NJP"
+                          search={(q) => searchRailwayStations(q)}
+                          getKey={(s) => s.code || s.name}
+                          renderPrimary={(s) => `${s.name}${s.code ? ` (${s.code})` : ''}`}
+                          renderSecondary={(s) => `${s.city}, ${s.state}`}
+                          onSelect={(s) => setBrief((p) => ({ ...p, returnFromStation: s ? { ...s, source: 'dataset' } : undefined }))}
+                          selectedPrimary={brief.returnFromStation ? `${brief.returnFromStation.name}${brief.returnFromStation.code ? ` (${brief.returnFromStation.code})` : ''}` : null}
+                          selectedSecondary={brief.returnFromStation ? `${brief.returnFromStation.city}, ${brief.returnFromStation.state}` : undefined}
+                          selectedBadge={brief.returnFromStation?.source === 'dataset' ? 'Dataset' : brief.returnFromStation ? 'Custom' : undefined}
+                          onClear={() => setBrief((p) => ({ ...p, returnFromStation: undefined }))}
+                          allowCustom
+                          onCustom={(t) => setBrief((p) => ({ ...p, returnFromStation: { name: t, code: '', city: t, state: '', source: 'custom' } }))}
+                        />
+                        <SearchableSelect<IndiaRailwayStation>
+                          label="Return to"
+                          placeholder="e.g. Howrah"
+                          search={(q) => searchRailwayStations(q)}
+                          getKey={(s) => s.code || s.name}
+                          renderPrimary={(s) => `${s.name}${s.code ? ` (${s.code})` : ''}`}
+                          renderSecondary={(s) => `${s.city}, ${s.state}`}
+                          onSelect={(s) => setBrief((p) => ({ ...p, returnToStation: s ? { ...s, source: 'dataset' } : undefined }))}
+                          selectedPrimary={brief.returnToStation ? `${brief.returnToStation.name}${brief.returnToStation.code ? ` (${brief.returnToStation.code})` : ''}` : null}
+                          selectedSecondary={brief.returnToStation ? `${brief.returnToStation.city}, ${brief.returnToStation.state}` : undefined}
+                          selectedBadge={brief.returnToStation?.source === 'dataset' ? 'Dataset' : brief.returnToStation ? 'Custom' : undefined}
+                          onClear={() => setBrief((p) => ({ ...p, returnToStation: undefined }))}
+                          allowCustom
+                          onCustom={(t) => setBrief((p) => ({ ...p, returnToStation: { name: t, code: '', city: t, state: '', source: 'custom' } }))}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input label="Return train no. (optional)" placeholder="e.g. 12378" value={brief.returnTrainNumber || ''} onChange={(e) => setBrief((p) => ({ ...p, returnTrainNumber: e.target.value }))} />
+                        <Input label="Return train name" placeholder="e.g. Padatik Express" value={brief.returnTrainName || ''} onChange={(e) => setBrief((p) => ({ ...p, returnTrainName: e.target.value }))} />
+                      </div>
+                    </div>
+                  )}
+                  {brief.transport.mode === 'flight' && (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <SearchableSelect<IndiaAirport>
+                        label="Return from"
+                        placeholder="e.g. IXB, Bagdogra"
+                        search={(q) => searchAirports(q)}
+                        getKey={(a) => a.iataCode}
+                        renderPrimary={(a) => `${a.name} (${a.iataCode})`}
+                        renderSecondary={(a) => `${a.city}, ${a.state}`}
+                        onSelect={(a) => setBrief((p) => ({ ...p, returnFromAirport: a ? { ...a, source: 'dataset' } : undefined }))}
+                        selectedPrimary={brief.returnFromAirport ? `${brief.returnFromAirport.name} (${brief.returnFromAirport.iataCode})` : null}
+                        selectedSecondary={brief.returnFromAirport ? `${brief.returnFromAirport.city}, ${brief.returnFromAirport.state}` : undefined}
+                        selectedBadge={brief.returnFromAirport?.source === 'dataset' ? 'Dataset' : brief.returnFromAirport ? 'Custom' : undefined}
+                        onClear={() => setBrief((p) => ({ ...p, returnFromAirport: undefined }))}
+                        allowCustom
+                        onCustom={(t) => setBrief((p) => ({ ...p, returnFromAirport: { name: t, iataCode: '', city: t, state: '', source: 'custom' } }))}
+                      />
+                      <SearchableSelect<IndiaAirport>
+                        label="Return to"
+                        placeholder="e.g. CCU, Kolkata"
+                        search={(q) => searchAirports(q)}
+                        getKey={(a) => a.iataCode}
+                        renderPrimary={(a) => `${a.name} (${a.iataCode})`}
+                        renderSecondary={(a) => `${a.city}, ${a.state}`}
+                        onSelect={(a) => setBrief((p) => ({ ...p, returnToAirport: a ? { ...a, source: 'dataset' } : undefined }))}
+                        selectedPrimary={brief.returnToAirport ? `${brief.returnToAirport.name} (${brief.returnToAirport.iataCode})` : null}
+                        selectedSecondary={brief.returnToAirport ? `${brief.returnToAirport.city}, ${brief.returnToAirport.state}` : undefined}
+                        selectedBadge={brief.returnToAirport?.source === 'dataset' ? 'Dataset' : brief.returnToAirport ? 'Custom' : undefined}
+                        onClear={() => setBrief((p) => ({ ...p, returnToAirport: undefined }))}
+                        allowCustom
+                        onCustom={(t) => setBrief((p) => ({ ...p, returnToAirport: { name: t, iataCode: '', city: t, state: '', source: 'custom' } }))}
+                      />
+                    </div>
+                  )}
+                  {(brief.transport.mode === 'bus' || brief.transport.mode === 'car' || brief.transport.mode === 'other') && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input label="Return from" placeholder="City" value={brief.returnFromCity || ''} onChange={(e) => setBrief((p) => ({ ...p, returnFromCity: e.target.value }))} />
+                      <Input label="Return to" placeholder="City" value={brief.returnToCity || ''} onChange={(e) => setBrief((p) => ({ ...p, returnToCity: e.target.value }))} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Cost + booking ref */}
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Total cost (optional)" type="number" min="0" placeholder="0" value={brief.transport.totalCost ? String(brief.transport.totalCost) : ''} onChange={(e) => setTransport({ totalCost: parseFloat(e.target.value) || undefined })} />
+                <Input label="Booking ref (optional)" placeholder="PNR / ref" value={brief.transport.bookingRef || ''} onChange={(e) => setTransport({ bookingRef: e.target.value })} />
               </div>
 
               {/* Ticket upload foundation — Coming Soon */}

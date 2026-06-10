@@ -1470,6 +1470,11 @@ export interface TripGeneratorInput {
   /** Nearest known station/airport — geographic context only (not bookings). */
   nearestRailwayStation?: Pick<RailwayStationRef, 'name' | 'code' | 'city' | 'state'>
   nearestAirport?: Pick<AirportRef, 'name' | 'iataCode' | 'city' | 'state'>
+  /**
+   * Structured transport-to-destination context. AI uses for geographic planning
+   * only — must NOT invent bookings, PNR, or confirmed ticket status.
+   */
+  transportContext?: TripTransportContext
 }
 
 export type ActivityPriority = 'must' | 'recommended' | 'optional'
@@ -1794,6 +1799,39 @@ export interface TripGeneratorAccommodation {
   googleVerified?: boolean
   /** Preferred stay area when no exact stay is chosen. */
   areaPreference?: string
+}
+
+/**
+ * Structured transport context sent to the AI generator (Phase hotfix / 16G prep).
+ * Context only — the AI must NOT invent PNR, ticket status, or confirmed bookings.
+ * All fields are optional so existing callers without transport details still work.
+ */
+export interface TripTransportContext {
+  mode?: 'train' | 'flight' | 'bus' | 'car' | 'other'
+  travelType?: 'one_way' | 'round_trip'
+  fromStation?: Pick<RailwayStationRef, 'name' | 'code' | 'city' | 'state'>
+  toStation?: Pick<RailwayStationRef, 'name' | 'code' | 'city' | 'state'>
+  fromAirport?: Pick<AirportRef, 'name' | 'iataCode' | 'city' | 'state'>
+  toAirport?: Pick<AirportRef, 'name' | 'iataCode' | 'city' | 'state'>
+  fromCity?: string
+  toCity?: string
+  /** Selected train number, if known. */
+  trainNumber?: string
+  trainName?: string
+  /**
+   * Route mismatch warning from local seed validation. When present, AI should
+   * advise the user to verify the train selection before booking.
+   */
+  trainRouteWarning?: string
+  /** Return leg present when travelType === 'round_trip'. */
+  returnFromStation?: Pick<RailwayStationRef, 'name' | 'code' | 'city' | 'state'>
+  returnToStation?: Pick<RailwayStationRef, 'name' | 'code' | 'city' | 'state'>
+  returnFromAirport?: Pick<AirportRef, 'name' | 'iataCode' | 'city' | 'state'>
+  returnToAirport?: Pick<AirportRef, 'name' | 'iataCode' | 'city' | 'state'>
+  returnFromCity?: string
+  returnToCity?: string
+  returnTrainNumber?: string
+  returnTrainName?: string
 }
 
 /** Compact per-day road-route summary shown in the generated preview. */

@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     // This is always logged (not gated on NODE_ENV) so Cloud Run surfaces it.
     console.error('[Voyago AI] trip-generator: provider init failed:', err instanceof Error ? err.message : err)
     return NextResponse.json(
-      { error: 'ai_unavailable', message: 'The AI service is not configured. Please check server settings.' },
+      { error: 'ai_generation_failed', stage: 'provider_init', message: 'The AI service is not configured. Please check server settings.' },
       { status: 502 },
     )
   }
@@ -99,21 +99,26 @@ export async function POST(request: Request) {
   // ── Real Anthropic path ───────────────────────────────────────────────────
 
   // Step 1: call the model. Separated from parse so failures are logged distinctly.
-  // maxTokens is set high enough to prevent JSON truncation even with adaptive thinking.
-  // Opus 4.8 with adaptive thinking uses some tokens for reasoning; 8000 leaves
-  // plenty for a 5–7 day itinerary at 4–5 activities/day.
+  // maxTokens must be high enough to cover adaptive thinking tokens + full JSON output.
+  // A 5–7 day itinerary at 4–5 activities/day is ~6000–9000 output tokens. Adaptive
+  // thinking for a generation-quality task may consume several thousand thinking tokens
+  // on top of that, so 20000 gives safe headroom without hitting model limits.
   let completion: Awaited<ReturnType<typeof provider.complete>>
   try {
     completion = await provider.complete({
       tier: 'generation',
       system: TRIP_GENERATOR_SYSTEM_PROMPT,
-      maxTokens: 8000,
+      maxTokens: 20000,
       messages: [{ role: 'user', content: buildTripGeneratorUserMessage(input) }],
     })
   } catch (err) {
-    console.error('[Voyago AI] trip-generator: Claude API call failed:', err instanceof Error ? err.message : err)
+    // Log full error detail server-side (never sent to client) for Cloud Run diagnosis.
+    const errMsg = err instanceof Error ? err.message : String(err)
+    const errStatus = (err as Record<string, unknown>)?.status
+    const errCode = (err as Record<string, unknown>)?.code
+    console.error('[Voyago AI] trip-generator: Claude API call failed', { message: errMsg, status: errStatus, code: errCode })
     return NextResponse.json(
-      { error: 'ai_unavailable', generationSource: 'unavailable', message: 'AI itinerary generation is currently unavailable. Please retry.' },
+      { error: 'ai_generation_failed', stage: 'anthropic_call', message: 'AI itinerary generation is currently unavailable. Please retry.' },
       { status: 502 },
     )
   }
@@ -136,7 +141,7 @@ export async function POST(request: Request) {
     // the route-level failure here for correlation in Cloud Run logs.
     console.error('[Voyago AI] trip-generator: response parse failed:', err instanceof Error ? err.message : err)
     return NextResponse.json(
-      { error: 'ai_parse_failed', generationSource: 'unavailable', message: 'AI itinerary generation is currently unavailable. Please retry.' },
+      { error: 'ai_generation_failed', stage: 'parse', message: 'AI itinerary generation is currently unavailable. Please retry.' },
       { status: 502 },
     )
   }
