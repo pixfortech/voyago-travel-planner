@@ -1484,6 +1484,7 @@ export type ActivityPriority = 'must' | 'recommended' | 'optional'
 /** Where a suggested item's price estimate came from (most → least reliable). */
 export type SuggestedFoodItemBasis =
   | 'official_menu_or_website'
+  | 'google_review_item_mentions'   // dish name found in review text
   | 'google_review_price_clues'
   | 'google_price_level'
   | 'restaurant_type_city_heuristic'
@@ -1508,6 +1509,8 @@ export interface SuggestedFoodItem {
   basis: SuggestedFoodItemBasis
   /** Short plain-language note, e.g. "Estimated from Google price level and restaurant type." */
   sourceNote?: string
+  /** Popularity signal inferred from review text. */
+  popularityHint?: 'best_seller' | 'popular' | 'often_mentioned' | 'recommended' | 'unknown'
 }
 
 
@@ -1855,6 +1858,12 @@ export interface TripTransportContext {
   /** Selected train number, if known. */
   trainNumber?: string
   trainName?: string
+  /** Departure time from origin station (HH:MM, approximate from local seed). */
+  trainDepartureTime?: string
+  /** Arrival time at destination station (HH:MM, approximate from local seed). */
+  trainArrivalTime?: string
+  /** Days the train runs (e.g. "Daily except Thu"). Approximate from local seed. */
+  trainDaysOfRun?: string
   /**
    * Route mismatch warning from local seed validation. When present, AI should
    * advise the user to verify the train selection before booking.
@@ -1869,6 +1878,11 @@ export interface TripTransportContext {
   returnToCity?: string
   returnTrainNumber?: string
   returnTrainName?: string
+  /** Return train departure time (HH:MM, approximate from local seed). */
+  returnTrainDepartureTime?: string
+  /** Return train arrival time (HH:MM, approximate from local seed). */
+  returnTrainArrivalTime?: string
+  returnTrainDaysOfRun?: string
 }
 
 /** Compact per-day road-route summary shown in the generated preview. */

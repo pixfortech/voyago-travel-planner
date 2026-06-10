@@ -1082,13 +1082,15 @@ export default function GeneratedItineraryPreview({
 
 // ── Suggested food items (Phase 16D refinement) ───────────────────────────────
 
-/** Plain-language label for an item's price basis (PART 8 wording). */
+/** Plain-language label for an item's price basis. */
 function itemBasisLabel(basis: SuggestedFoodItem['basis'], confidence: SuggestedFoodItem['confidence']): string {
   switch (basis) {
     case 'user_entered':
       return 'Confirmed price'
     case 'official_menu_or_website':
       return 'Menu-based estimate'
+    case 'google_review_item_mentions':
+      return 'Review-mentioned dish'
     case 'google_review_price_clues':
       return 'Review-based estimate'
     case 'google_price_level':
@@ -1096,6 +1098,16 @@ function itemBasisLabel(basis: SuggestedFoodItem['basis'], confidence: Suggested
     case 'restaurant_type_city_heuristic':
     default:
       return confidence === 'low' ? 'Heuristic estimate' : 'Estimate'
+  }
+}
+
+function popularityHintLabel(hint: SuggestedFoodItem['popularityHint']): string | null {
+  switch (hint) {
+    case 'best_seller': return '★ Best seller'
+    case 'popular': return '★ Popular'
+    case 'often_mentioned': return 'Often mentioned'
+    case 'recommended': return 'Recommended'
+    default: return null
   }
 }
 
@@ -1145,6 +1157,12 @@ function SuggestedItemsBlock({
             </button>
             <span className={`font-semibold text-gray-700 ${isRemoved ? 'line-through' : ''}`}>{item.name}</span>
             {badge && <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>}
+            {item.popularityHint && item.popularityHint !== 'unknown' && (() => {
+              const ph = popularityHintLabel(item.popularityHint)
+              return ph ? (
+                <span className="text-[8px] font-semibold px-1 py-0.5 rounded-full bg-violet-50 text-violet-600">{ph}</span>
+              ) : null
+            })()}
             <span className="text-gray-500">
               {formatCurrency(item.estimatedPriceMin, currency)}–{formatCurrency(item.estimatedPriceMax, currency)}/person
             </span>

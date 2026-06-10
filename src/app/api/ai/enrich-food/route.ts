@@ -1,5 +1,5 @@
 /**
- * POST /api/ai/enrich-food — Phase 16D (+ menu/review-aware refinement).
+ * POST /api/ai/enrich-food — Phase 16D (+ menu/review-aware refinement + hotfix).
  *
  * Replaces generic AI-generated food breaks with real Google Places
  * restaurant/café suggestions, then estimates per-item food/drink prices using
@@ -7,26 +7,234 @@
  * heuristic:
  *
  *   1. official_menu_or_website     — Place Details website/menu URL is STORED
- *                                     and surfaced as a link. We do NOT scrape
- *                                     it, so it never raises confidence above
- *                                     what we can confidently parse (none here).
- *   2. google_review_price_clues    — safe price signals scanned from review
- *                                     text snippets (e.g. "₹200", "1000 for two",
- *                                     "reasonable"). Estimates only — never quoted
- *                                     as current menu prices.
- *   3. google_price_level           — Google price level as a broad bucket.
- *   4. restaurant_type_city_heuristic — fallback from meal type + budget style.
+ *                                     and surfaced as a link. We do NOT scrape it.
+ *   2. google_review_item_mentions  — dish names found in review text snippets.
+ *   3. google_review_price_clues    — price signals from review text.
+ *   4. google_price_level           — Google price level as a broad bucket.
+ *   5. restaurant_type_city_heuristic — fallback from meal type + budget style.
  *
- * Place Details (website + reviews) is fetched for the SELECTED top candidate
- * only — never every search result — to control cost.
+ * Hotfix additions:
+ *   - Locale-aware dish templates (NE India, Bengali, South Indian, etc.)
+ *   - Dietary correctness: pure-veg restaurants never show non-veg items
+ *   - Score-based restaurant candidate selection (rating + reviews + dietary match)
  *
- * No Google Maps HTML scraping. No Swiggy/Zomato scraping. Server-only — the
- * Maps key never leaves this module.
+ * No Google Maps HTML scraping. No Swiggy/Zomato scraping. Server-only.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { searchPlaces, fetchPlaceDetails, isMapsAvailable } from '@/lib/maps/googleServer'
 import type { FoodPreference, SuggestedFoodItem, SuggestedFoodItemBasis } from '@/types'
+import type { PlaceSearchResult } from '@/types'
+
+// ── Dietary profile detection ───────────────────────────────────────────────
+
+type DietaryProfile = 'pure_veg' | 'mixed' | 'non_veg_friendly' | 'cafe' | 'dessert' | 'unknown'
+
+/**
+ * Detect the dietary profile of a restaurant from its name + Google place types.
+ * Used for candidate scoring and to prevent pure-veg places from showing non-veg items.
+ */
+function detectDietaryProfile(name: string, types?: string[]): DietaryProfile {
+  const n = name.toLowerCase()
+  const t = (types ?? []).map((x) => x.toLowerCase())
+
+  // Pure-veg signals (highest priority)
+  if (
+    /\bpure\s*veg\b|\bpurely\s*veg\b|\b100\s*%\s*veg\b|\bveg\s+(restaurant|dhaba|thali|bhojan|hotel|bhojnalaya)\b|\bsattvic\b|\bjain\s+(food|bhojan|restaurant)\b/.test(n) ||
+    t.includes('vegetarian_restaurant')
+  ) {
+    return 'pure_veg'
+  }
+
+  // Café/coffee shop
+  if (t.some((x) => x.includes('cafe') || x.includes('coffee_shop'))) return 'cafe'
+  if (/\b(café|cafe|coffee|bakery|patisserie|tea\s*house)\b/.test(n)) return 'cafe'
+
+  // Dessert / sweet shop
+  if (t.some((x) => x.includes('dessert') || x.includes('ice_cream') || x.includes('confectionery'))) return 'dessert'
+  if (/\b(sweets?|mithai|halwai|mishtan|cake\s*shop|ice.?cream|confectionery)\b/.test(n)) return 'dessert'
+
+  // Non-veg friendly
+  if (/\b(non.?veg|chicken|mutton|fish|seafood|bbq|grill|kebab|meat|biryani.*house|mughlai|coastal\s+seafood)\b/.test(n)) return 'non_veg_friendly'
+
+  return 'mixed'
+}
+
+// ── Cuisine region detection ────────────────────────────────────────────────
+
+type CuisineRegion = 'ne_india' | 'bengali' | 'south_indian' | 'north_indian' | 'rajasthani' | 'goan' | 'mumbai' | 'generic'
+
+function detectCuisineRegion(destination: string): CuisineRegion {
+  const d = destination.toLowerCase()
+
+  // NE India / Himalayan
+  if (/gangtok|sikkim|darjeeling|kalimpong|mirik|pelling|yuksom|lachung|lachen|namchi|ravangla|tashiling|kurseong|siliguri/.test(d)) return 'ne_india'
+  if (/guwahati|shillong|kaziranga|cherrapunji|itanagar|imphal|aizawl|kohima|agartala/.test(d)) return 'ne_india'
+
+  // Bengali cities
+  if (/kolkata|howrah|durgapur|asansol|bankura|shantiniketan|bishnupur|burdwan/.test(d)) return 'bengali'
+
+  // South Indian cities
+  if (/bangalore|bengaluru|chennai|hyderabad|kochi|cochin|mysore|coimbatore|trivandrum|thiruvananthapuram|madurai|pondicherry|vijayawada/.test(d)) return 'south_indian'
+  if (/kerala|karnataka|tamil\s*nadu|telangana|andhra/.test(d)) return 'south_indian'
+
+  // Goa
+  if (/\bgoa\b|panaji|mapusa|margao|vasco|calangute|anjuna/.test(d)) return 'goan'
+
+  // Rajasthan
+  if (/jaipur|udaipur|jodhpur|jaisalmer|pushkar|ajmer|bikaner|kota|chittorgarh/.test(d)) return 'rajasthani'
+
+  // North Indian / Delhi / UP / Punjab
+  if (/delhi|agra|lucknow|amritsar|chandigarh|varanasi|mathura|vrindavan|rishikesh|haridwar|mussoorie|shimla/.test(d)) return 'north_indian'
+
+  // Mumbai / Maharashtra
+  if (/mumbai|pune|nashik|aurangabad|lonavala|mahabaleshwar/.test(d)) return 'mumbai'
+
+  return 'generic'
+}
+
+// ── Review item mention scanner ─────────────────────────────────────────────
+
+interface DishMeta {
+  patterns: string[]
+  name: string
+  vegType: 'veg' | 'non_veg' | 'vegan' | 'unknown'
+  category: SuggestedFoodItem['category']
+  region?: CuisineRegion | CuisineRegion[]
+}
+
+const DISH_KEYWORDS: DishMeta[] = [
+  // NE India / Himalayan
+  { patterns: ['momo', 'momos'], name: 'Momo', vegType: 'unknown', category: 'snack', region: 'ne_india' },
+  { patterns: ['thukpa', 'thenthuk'], name: 'Thukpa noodle soup', vegType: 'unknown', category: 'food', region: 'ne_india' },
+  { patterns: ['wai wai', 'wai-wai'], name: 'Wai Wai noodles', vegType: 'veg', category: 'snack', region: 'ne_india' },
+  { patterns: ['chow mein', 'chowmein'], name: 'Chow mein', vegType: 'unknown', category: 'food', region: 'ne_india' },
+  { patterns: ['gundruk'], name: 'Gundruk soup', vegType: 'veg', category: 'food', region: 'ne_india' },
+  { patterns: ['sha phaley', 'shaphaley'], name: 'Sha Phaley', vegType: 'non_veg', category: 'snack', region: 'ne_india' },
+  { patterns: ['tongba'], name: 'Tongba (millet drink)', vegType: 'veg', category: 'drink', region: 'ne_india' },
+  // Bengali
+  { patterns: ['rosogolla', 'rasgulla', 'rossogolla'], name: 'Rosogolla', vegType: 'veg', category: 'dessert', region: 'bengali' },
+  { patterns: ['sandesh'], name: 'Sandesh', vegType: 'veg', category: 'dessert', region: 'bengali' },
+  { patterns: ['mishti doi', 'mishti dahi'], name: 'Mishti Doi', vegType: 'veg', category: 'dessert', region: 'bengali' },
+  { patterns: ['macher jhol', 'fish curry'], name: 'Macher Jhol (fish curry)', vegType: 'non_veg', category: 'food', region: 'bengali' },
+  { patterns: ['kosha mangsho'], name: 'Kosha Mangsho', vegType: 'non_veg', category: 'food', region: 'bengali' },
+  { patterns: ['luchi'], name: 'Luchi with sabzi', vegType: 'veg', category: 'food', region: 'bengali' },
+  { patterns: ['kathi roll', 'kati roll'], name: 'Kathi Roll', vegType: 'unknown', category: 'snack', region: 'bengali' },
+  // South Indian
+  { patterns: ['masala dosa', 'dosa', 'dosai'], name: 'Masala Dosa', vegType: 'veg', category: 'food', region: 'south_indian' },
+  { patterns: ['idli', 'idly'], name: 'Idli', vegType: 'veg', category: 'food', region: 'south_indian' },
+  { patterns: ['medu vada', 'vada'], name: 'Medu Vada', vegType: 'veg', category: 'snack', region: 'south_indian' },
+  { patterns: ['uttapam'], name: 'Uttapam', vegType: 'veg', category: 'food', region: 'south_indian' },
+  { patterns: ['appam'], name: 'Appam with stew', vegType: 'unknown', category: 'food', region: 'south_indian' },
+  { patterns: ['fish fry', 'fish curry rice'], name: 'Fish curry rice', vegType: 'non_veg', category: 'food', region: ['south_indian', 'goan'] },
+  // Goan
+  { patterns: ['prawn', 'prawns', 'prawn curry'], name: 'Prawn curry', vegType: 'non_veg', category: 'food', region: 'goan' },
+  { patterns: ['goan fish curry'], name: 'Goan fish curry', vegType: 'non_veg', category: 'food', region: 'goan' },
+  { patterns: ['bebinca'], name: 'Bebinca dessert', vegType: 'veg', category: 'dessert', region: 'goan' },
+  // Rajasthan
+  { patterns: ['dal bati', 'dal baati', 'dal bati churma'], name: 'Dal Baati Churma', vegType: 'veg', category: 'food', region: 'rajasthani' },
+  { patterns: ['laal maas', 'lal maas'], name: 'Laal Maas', vegType: 'non_veg', category: 'food', region: 'rajasthani' },
+  { patterns: ['kachori', 'pyaaz kachori'], name: 'Pyaaz Kachori', vegType: 'veg', category: 'snack', region: 'rajasthani' },
+  { patterns: ['ghewar'], name: 'Ghewar', vegType: 'veg', category: 'dessert', region: 'rajasthani' },
+  // North Indian
+  { patterns: ['butter chicken', 'murgh makhani'], name: 'Butter Chicken', vegType: 'non_veg', category: 'food', region: 'north_indian' },
+  { patterns: ['dal makhani', 'dal makhni'], name: 'Dal Makhani', vegType: 'veg', category: 'food', region: 'north_indian' },
+  { patterns: ['chole bhature', 'chhole bhature'], name: 'Chole Bhature', vegType: 'veg', category: 'food', region: 'north_indian' },
+  { patterns: ['rajma chawal', 'rajma rice'], name: 'Rajma Chawal', vegType: 'veg', category: 'food', region: 'north_indian' },
+  // Mumbai / pan-Indian
+  { patterns: ['vada pav', 'vada-pav'], name: 'Vada Pav', vegType: 'veg', category: 'snack', region: 'mumbai' },
+  { patterns: ['pav bhaji'], name: 'Pav Bhaji', vegType: 'veg', category: 'food', region: 'mumbai' },
+  { patterns: ['misal pav'], name: 'Misal Pav', vegType: 'veg', category: 'food', region: 'mumbai' },
+  // Pan-Indian
+  { patterns: ['biryani'], name: 'Biryani', vegType: 'non_veg', category: 'food' },
+  { patterns: ['veg biryani', 'vegetable biryani'], name: 'Veg Biryani', vegType: 'veg', category: 'food' },
+  { patterns: ['paneer'], name: 'Paneer dish', vegType: 'veg', category: 'food' },
+  { patterns: ['thali'], name: 'Thali', vegType: 'veg', category: 'food' },
+  { patterns: ['naan', 'garlic naan'], name: 'Garlic Naan', vegType: 'veg', category: 'food' },
+  { patterns: ['paratha', 'aloo paratha'], name: 'Aloo Paratha', vegType: 'veg', category: 'food' },
+  { patterns: ['samosa'], name: 'Samosa', vegType: 'veg', category: 'snack' },
+  // Drinks
+  { patterns: ['masala chai', 'masala tea', 'cutting chai'], name: 'Masala Chai', vegType: 'veg', category: 'drink' },
+  { patterns: ['lassi'], name: 'Lassi', vegType: 'veg', category: 'drink' },
+  { patterns: ['fresh juice', 'sugarcane juice'], name: 'Fresh juice', vegType: 'vegan', category: 'drink' },
+  { patterns: ['cold coffee', 'iced coffee'], name: 'Cold coffee', vegType: 'veg', category: 'drink' },
+  // Desserts
+  { patterns: ['gulab jamun'], name: 'Gulab Jamun', vegType: 'veg', category: 'dessert' },
+  { patterns: ['kulfi'], name: 'Kulfi', vegType: 'veg', category: 'dessert' },
+  { patterns: ['jalebi'], name: 'Jalebi', vegType: 'veg', category: 'dessert' },
+  { patterns: ['halwa'], name: 'Halwa', vegType: 'veg', category: 'dessert' },
+  { patterns: ['ice cream'], name: 'Ice cream', vegType: 'veg', category: 'dessert' },
+]
+
+interface ReviewItemMention {
+  name: string
+  vegType: 'veg' | 'non_veg' | 'vegan' | 'unknown'
+  category: SuggestedFoodItem['category']
+  popularityHint: NonNullable<SuggestedFoodItem['popularityHint']>
+  count: number
+}
+
+/**
+ * Scan review text for dish name mentions and popularity signals.
+ * Returns a ranked list of mentioned dishes — never displays raw review text to the user.
+ */
+function scanReviewItemMentions(
+  reviews: Array<{ text: string }> | undefined,
+  cuisineRegion: CuisineRegion,
+): ReviewItemMention[] {
+  if (!reviews || reviews.length === 0) return []
+
+  const counts = new Map<string, ReviewItemMention>()
+
+  for (const r of reviews) {
+    const text = (r.text || '').slice(0, 600).toLowerCase()
+    if (!text) continue
+
+    // Popularity signals in this review
+    const isBestSeller = /\b(best|must\s*try|famous\s*for|signature|specialty|specialty dish|their\s+\w+\s+is\s+amazing)\b/.test(text)
+    const isPopular = /\b(popular|everyone\s+orders?|most\s+order|all\s+order)\b/.test(text)
+    const isRecommended = /\b(recommend|try\s+the|go\s+for\s+the|order\s+the|best\s+here)\b/.test(text)
+
+    for (const dish of DISH_KEYWORDS) {
+      // Region filter — only match if dish is global or matches current region
+      if (dish.region) {
+        const regions = Array.isArray(dish.region) ? dish.region : [dish.region]
+        if (!regions.includes(cuisineRegion) && cuisineRegion !== 'generic') continue
+      }
+      const matches = dish.patterns.some((pat) => text.includes(pat))
+      if (!matches) continue
+
+      const existing = counts.get(dish.name)
+      const hint: NonNullable<SuggestedFoodItem['popularityHint']> = isBestSeller
+        ? 'best_seller'
+        : isPopular
+          ? 'popular'
+          : isRecommended
+            ? 'recommended'
+            : 'often_mentioned'
+
+      if (existing) {
+        existing.count++
+        // Escalate popularity hint
+        if (hint === 'best_seller' || (hint === 'popular' && existing.popularityHint === 'recommended')) {
+          existing.popularityHint = hint
+        }
+      } else {
+        counts.set(dish.name, {
+          name: dish.name,
+          vegType: dish.vegType,
+          category: dish.category,
+          popularityHint: hint,
+          count: 1,
+        })
+      }
+    }
+  }
+
+  return Array.from(counts.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5)
+}
 
 // ── Spend estimator ────────────────────────────────────────────────────────
 
@@ -41,7 +249,6 @@ interface SpendRange {
   basis: SpendBasis
 }
 
-// Per-person INR ranges by Google price level.
 const PRICE_LEVEL_RANGES: Record<number, [number, number]> = {
   1: [80, 220],
   2: [200, 550],
@@ -49,55 +256,42 @@ const PRICE_LEVEL_RANGES: Record<number, [number, number]> = {
   4: [1400, 4000],
 }
 
-// Heuristic per-person INR ranges by food budget style.
 const STYLE_RANGES: Record<string, [number, number]> = {
   budget: [80, 250],
   mid_range: [200, 600],
   premium: [550, 2000],
 }
 
-const NON_INR_FACTOR = 0.012 // 1 INR ≈ 0.012 USD (rough)
-
-// ── Review price-clue scanner ───────────────────────────────────────────────
+const NON_INR_FACTOR = 0.012
 
 interface ReviewClue {
   perPersonMin: number
   perPersonMax: number
-  /** numeric = parsed amounts (medium); keyword_only = weak text signal (low). */
   kind: 'numeric' | 'keyword_only'
 }
 
-/**
- * Scan review text for SAFE price clues only. We read short snippets internally,
- * never display long review text, and never treat the result as confirmed
- * current menu pricing. Returns per-person INR band, or null when no clue.
- */
 function scanReviewPriceClues(reviews: Array<{ text: string }> | undefined): ReviewClue | null {
   if (!reviews || reviews.length === 0) return null
-  const amounts: number[] = [] // per-person rupee amounts
+  const amounts: number[] = []
   let keyword: 'cheap' | 'mid' | 'expensive' | null = null
 
   for (const r of reviews) {
-    const text = (r.text || '').slice(0, 600).toLowerCase() // small snippet only
+    const text = (r.text || '').slice(0, 600).toLowerCase()
     if (!text) continue
 
-    // "₹1000 for two" / "1000 for couple" → per person = /2.
     for (const m of Array.from(text.matchAll(/(?:₹|rs\.?|inr)?\s?(\d{2,5})\s*(?:\/-)?\s*(?:for two|for 2|for couple)/g))) {
       const v = parseInt(m[1]!, 10)
       if (v >= 50 && v <= 100000) amounts.push(Math.round(v / 2))
     }
-    // "₹300 per person" / "300 pp" / "300 each"
     for (const m of Array.from(text.matchAll(/(?:₹|rs\.?|inr)?\s?(\d{2,5})\s*(?:\/-)?\s*(?:per person|per head|pp|each)/g))) {
       const v = parseInt(m[1]!, 10)
       if (v >= 30 && v <= 50000) amounts.push(v)
     }
-    // Bare currency-tagged amounts "₹200", "Rs 500".
     for (const m of Array.from(text.matchAll(/(?:₹|rs\.?|inr)\s?(\d{2,5})/g))) {
       const v = parseInt(m[1]!, 10)
       if (v >= 30 && v <= 5000) amounts.push(v)
     }
 
-    // Keyword signals (weak).
     if (/\b(expensive|pricey|costly|overpriced)\b/.test(text)) keyword = 'expensive'
     else if (/\b(reasonable|affordable|value for money|worth it)\b/.test(text) && keyword !== 'expensive') keyword = 'mid'
     else if (/\b(cheap|budget|inexpensive|pocket friendly|pocket-friendly)\b/.test(text) && !keyword) keyword = 'cheap'
@@ -120,10 +314,6 @@ function scanReviewPriceClues(reviews: Array<{ text: string }> | undefined): Rev
   return null
 }
 
-/**
- * Resolve a per-person spend band using the source hierarchy. Confidence is
- * deliberately conservative — most estimates stay medium or low.
- */
 function estimateSpend(
   priceLevel: number | undefined,
   foodBudgetStyle: string | undefined,
@@ -137,24 +327,20 @@ function estimateSpend(
   let basis: SpendBasis
 
   if (reviewClue && reviewClue.kind === 'numeric') {
-    // Numeric review clues — medium confidence (estimate, not confirmed menu).
     perMin = reviewClue.perPersonMin
     perMax = reviewClue.perPersonMax
     confidence = 'medium'
     basis = 'google_review_price_clues'
   } else if (priceLevel != null && PRICE_LEVEL_RANGES[priceLevel]) {
-    // Google price level — broad bucket, medium confidence.
     ;[perMin, perMax] = PRICE_LEVEL_RANGES[priceLevel]!
     confidence = 'medium'
     basis = 'google_price_level'
   } else if (reviewClue && reviewClue.kind === 'keyword_only') {
-    // Weak review text only — low confidence.
     perMin = reviewClue.perPersonMin
     perMax = reviewClue.perPersonMax
     confidence = 'low'
     basis = 'google_review_price_clues'
   } else {
-    // Pure heuristic — low confidence.
     const [lo, hi] = STYLE_RANGES[foodBudgetStyle ?? 'mid_range'] ?? [150, 450]
     perMin = lo
     perMax = hi
@@ -168,14 +354,7 @@ function estimateSpend(
   }
 
   const n = Math.max(1, travellerCount)
-  return {
-    perPersonMin: perMin,
-    perPersonMax: perMax,
-    min: perMin * n,
-    max: perMax * n,
-    confidence,
-    basis,
-  }
+  return { perPersonMin: perMin, perPersonMax: perMax, min: perMin * n, max: perMax * n, confidence, basis }
 }
 
 // ── Suggested-item builder ──────────────────────────────────────────────────
@@ -184,58 +363,140 @@ interface ItemTemplate {
   name: string
   category: SuggestedFoodItem['category']
   vegType: NonNullable<SuggestedFoodItem['vegType']>
-  /** Fraction of a per-person meal this item represents (shares ≈ sum to 1). */
   share: number
 }
 
 const VEG_LABEL = (vegan: boolean) => (vegan ? 'Vegan' : 'Vegetarian')
 
-function templatesFor(
+/** Locale-aware fallback templates when no review mentions are available. */
+function localeTemplatesFor(
   mealType: string | undefined,
+  region: CuisineRegion,
   wantVeg: boolean,
   wantNonVeg: boolean,
   vegan: boolean,
 ): ItemTemplate[] {
   const vegType: NonNullable<SuggestedFoodItem['vegType']> = vegan ? 'vegan' : 'veg'
-  const vlabel = VEG_LABEL(vegan)
-  // No explicit preference → show a general set marked unknown.
   const neutral = !wantVeg && !wantNonVeg
 
+  // Café: always generic
   if (mealType === 'cafe') {
-    const items: ItemTemplate[] = [
+    return [
       { name: 'Coffee / beverage', category: 'drink', vegType: neutral ? 'unknown' : vegType, share: 0.45 },
       { name: 'Cake / dessert', category: 'dessert', vegType: neutral ? 'unknown' : vegType, share: 0.3 },
       { name: 'Sandwich / light bite', category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.25 },
     ]
-    return items
   }
 
+  // Breakfast
   if (mealType === 'breakfast') {
+    if (region === 'ne_india') {
+      const out: ItemTemplate[] = []
+      if (wantNonVeg) out.push({ name: 'Egg momo / egg paratha', category: 'food', vegType: 'non_veg', share: 0.65 })
+      if (wantVeg || neutral) out.push({ name: neutral ? 'Momo / paratha' : `${VEG_LABEL(vegan)} momo / bread`, category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.65 })
+      out.push({ name: 'Masala chai / tongba', category: 'drink', vegType: 'veg', share: 0.35 })
+      return out
+    }
+    if (region === 'south_indian') {
+      const out: ItemTemplate[] = []
+      if (wantNonVeg) out.push({ name: 'Egg dosa / omelette', category: 'food', vegType: 'non_veg', share: 0.65 })
+      if (wantVeg || neutral) out.push({ name: 'Idli / Dosa with sambhar', category: 'food', vegType: 'veg', share: 0.65 })
+      out.push({ name: 'Filter coffee / tea', category: 'drink', vegType: 'veg', share: 0.35 })
+      return out
+    }
+    if (region === 'bengali') {
+      const out: ItemTemplate[] = []
+      if (wantVeg || neutral) out.push({ name: 'Luchi with sabzi / Paratha', category: 'food', vegType: 'veg', share: 0.65 })
+      if (wantNonVeg) out.push({ name: 'Egg roll / egg paratha', category: 'food', vegType: 'non_veg', share: 0.65 })
+      out.push({ name: 'Masala chai', category: 'drink', vegType: 'veg', share: 0.35 })
+      return out
+    }
+    // Generic / North Indian
     const out: ItemTemplate[] = []
     if (wantNonVeg) out.push({ name: 'Egg / non-veg breakfast', category: 'food', vegType: 'non_veg', share: 0.65 })
-    if (wantVeg || neutral) out.push({ name: `${neutral ? 'Breakfast plate' : `${vlabel} breakfast plate`}`, category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.65 })
+    if (wantVeg || neutral) out.push({ name: neutral ? 'Breakfast plate' : `${VEG_LABEL(vegan)} breakfast plate`, category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.65 })
     out.push({ name: 'Tea / coffee', category: 'drink', vegType: neutral ? 'unknown' : 'veg', share: 0.35 })
     return out
   }
 
+  // Snack
   if (mealType === 'snack') {
+    if (region === 'ne_india') {
+      return [
+        { name: neutral ? 'Momo / snack' : wantNonVeg && !wantVeg ? 'Non-veg momo' : 'Veg momo', category: 'snack', vegType: neutral ? 'unknown' : wantNonVeg && !wantVeg ? 'non_veg' : vegType, share: 0.65 },
+        { name: 'Masala chai / Wai Wai', category: 'drink', vegType: 'veg', share: 0.35 },
+      ]
+    }
+    if (region === 'bengali') {
+      return [
+        { name: neutral ? 'Kathi Roll / snack' : wantNonVeg ? 'Non-veg Kathi Roll' : 'Veg snack plate', category: 'snack', vegType: neutral ? 'unknown' : wantNonVeg ? 'non_veg' : vegType, share: 0.65 },
+        { name: 'Lassi / tea', category: 'drink', vegType: 'veg', share: 0.35 },
+      ]
+    }
+    if (region === 'rajasthani') {
+      return [
+        { name: 'Pyaaz Kachori / samosa', category: 'snack', vegType: 'veg', share: 0.65 },
+        { name: 'Masala chai', category: 'drink', vegType: 'veg', share: 0.35 },
+      ]
+    }
     return [
-      { name: neutral ? 'Local snack plate' : wantNonVeg && !wantVeg ? 'Non-veg snack plate' : `${vlabel} snack plate`, category: 'snack', vegType: neutral ? 'unknown' : wantNonVeg && !wantVeg ? 'non_veg' : vegType, share: 0.65 },
+      { name: neutral ? 'Local snack plate' : wantNonVeg && !wantVeg ? 'Non-veg snack plate' : `${VEG_LABEL(vegan)} snack plate`, category: 'snack', vegType: neutral ? 'unknown' : wantNonVeg && !wantVeg ? 'non_veg' : vegType, share: 0.65 },
       { name: 'Beverage', category: 'drink', vegType: neutral ? 'unknown' : 'veg', share: 0.35 },
     ]
   }
 
-  // Default: lunch / dinner / generic meal.
+  // Lunch / dinner / generic meal
+  if (region === 'ne_india') {
+    const out: ItemTemplate[] = []
+    if (wantVeg || neutral) out.push({ name: neutral ? 'Rice plate / momo' : 'Veg momo / thali', category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.55 })
+    if (wantNonVeg) out.push({ name: 'Non-veg momo / thukpa', category: 'food', vegType: 'non_veg', share: 0.55 })
+    out.push({ name: 'Masala chai / Wai Wai', category: 'drink', vegType: 'veg', share: 0.25 })
+    out.push({ name: 'Fried rice / chow mein', category: 'food', vegType: neutral ? 'unknown' : 'veg', share: 0.2 })
+    return out
+  }
+  if (region === 'bengali') {
+    const out: ItemTemplate[] = []
+    if (wantVeg || neutral) out.push({ name: neutral ? 'Bengali thali' : 'Veg Bengali thali', category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.55 })
+    if (wantNonVeg) out.push({ name: 'Macher jhol / kosha mangsho', category: 'food', vegType: 'non_veg', share: 0.55 })
+    out.push({ name: 'Rosogolla / mishti doi', category: 'dessert', vegType: 'veg', share: 0.2 })
+    out.push({ name: 'Lassi / mishti', category: 'drink', vegType: 'veg', share: 0.25 })
+    return out
+  }
+  if (region === 'south_indian') {
+    const out: ItemTemplate[] = []
+    if (wantVeg || neutral) out.push({ name: neutral ? 'South Indian thali / dosa' : 'Veg thali / dosa', category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.55 })
+    if (wantNonVeg) out.push({ name: 'Chicken / fish curry rice', category: 'food', vegType: 'non_veg', share: 0.55 })
+    out.push({ name: 'Sambhar / rasam', category: 'food', vegType: 'veg', share: 0.15 })
+    out.push({ name: 'Filter coffee / buttermilk', category: 'drink', vegType: 'veg', share: 0.3 })
+    return out
+  }
+  if (region === 'rajasthani') {
+    const out: ItemTemplate[] = []
+    if (wantVeg || neutral) out.push({ name: neutral ? 'Dal Baati Churma / thali' : 'Rajasthani veg thali', category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.55 })
+    if (wantNonVeg) out.push({ name: 'Laal maas / non-veg curry', category: 'food', vegType: 'non_veg', share: 0.55 })
+    out.push({ name: 'Churma / sweets', category: 'dessert', vegType: 'veg', share: 0.2 })
+    out.push({ name: 'Lassi / chaas', category: 'drink', vegType: 'veg', share: 0.25 })
+    return out
+  }
+  if (region === 'goan') {
+    const out: ItemTemplate[] = []
+    if (wantVeg || neutral) out.push({ name: neutral ? 'Goan thali / veg curry rice' : 'Veg Goan thali', category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.55 })
+    if (wantNonVeg) out.push({ name: 'Fish curry rice / prawn curry', category: 'food', vegType: 'non_veg', share: 0.55 })
+    out.push({ name: 'Sol kadhi / kokum drink', category: 'drink', vegType: 'veg', share: 0.25 })
+    return out
+  }
+  // Generic North Indian / other
   const out: ItemTemplate[] = []
-  if (wantVeg || neutral) out.push({ name: neutral ? 'Main course' : `${vlabel} main course`, category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.55 })
+  if (wantVeg || neutral) out.push({ name: neutral ? 'Main course' : `${VEG_LABEL(vegan)} main course`, category: 'food', vegType: neutral ? 'unknown' : vegType, share: 0.55 })
   if (wantNonVeg) out.push({ name: 'Non-veg main course', category: 'food', vegType: 'non_veg', share: 0.55 })
-  out.push({ name: 'Bread / rice', category: 'food', vegType: neutral ? 'unknown' : 'veg', share: 0.2 })
-  out.push({ name: 'Beverage / lassi', category: 'drink', vegType: neutral ? 'unknown' : 'veg', share: 0.25 })
+  out.push({ name: 'Bread / roti / rice', category: 'food', vegType: neutral ? 'unknown' : 'veg', share: 0.2 })
+  out.push({ name: 'Lassi / beverage', category: 'drink', vegType: neutral ? 'unknown' : 'veg', share: 0.25 })
   return out
 }
 
 const SOURCE_NOTE: Record<SuggestedFoodItemBasis, string> = {
   official_menu_or_website: 'Estimated from official menu/website where available.',
+  google_review_item_mentions: 'Item mentioned in Google reviews; price is approximate.',
   google_review_price_clues: 'Estimated from review price clues; menu price not confirmed.',
   google_price_level: 'Estimated from Google price level and restaurant type.',
   restaurant_type_city_heuristic: 'Heuristic estimate only.',
@@ -255,30 +516,134 @@ function buildSuggestedItems(
   foodPreferences: FoodPreference[],
   spend: SpendRange,
   currency: string,
+  cuisineRegion: CuisineRegion,
+  dietaryProfile: DietaryProfile,
+  reviewMentions: ReviewItemMention[],
 ): SuggestedFoodItem[] {
   const wantVeg = foodPreferences.includes('vegetarian') || foodPreferences.includes('jain') || foodPreferences.includes('vegan')
   const wantNonVeg = foodPreferences.includes('non_vegetarian')
   const vegan = foodPreferences.includes('vegan') && !foodPreferences.includes('vegetarian')
 
-  const templates = templatesFor(mealType, wantVeg, wantNonVeg, vegan)
+  // Enforce dietary correctness: pure_veg restaurants + veg preference → no non-veg items
+  const strictVeg = wantVeg || dietaryProfile === 'pure_veg'
+
   const itemBasis = spendBasisToItemBasis(spend.basis)
+
+  // ── Build from review mentions when available ──
+  if (reviewMentions.length >= 2) {
+    return reviewMentions
+      .filter((m) => {
+        if (strictVeg && m.vegType === 'non_veg') return false
+        if (!wantNonVeg && !wantVeg && m.vegType === 'non_veg' && dietaryProfile === 'pure_veg') return false
+        return true
+      })
+      .slice(0, 4)
+      .map((m) => {
+        const share = m.category === 'food' ? 0.5 : m.category === 'drink' ? 0.25 : m.category === 'snack' ? 0.35 : 0.2
+        const min = Math.max(1, Math.round(spend.perPersonMin * share))
+        const max = Math.max(min + 1, Math.round(spend.perPersonMax * share))
+        return {
+          name: m.name,
+          category: m.category,
+          vegType: m.vegType,
+          estimatedPriceMin: min,
+          estimatedPriceMax: max,
+          currency,
+          confidence: spend.confidence,
+          basis: 'google_review_item_mentions' as const,
+          sourceNote: SOURCE_NOTE['google_review_item_mentions'],
+          popularityHint: m.popularityHint,
+        }
+      })
+  }
+
+  // ── Fall back to locale-aware templates ──
+  const templates = localeTemplatesFor(mealType, cuisineRegion, wantVeg, wantNonVeg, vegan)
   const note = SOURCE_NOTE[itemBasis]
 
-  return templates.map((t) => {
-    const min = Math.max(1, Math.round(spend.perPersonMin * t.share))
-    const max = Math.max(min + 1, Math.round(spend.perPersonMax * t.share))
-    return {
-      name: t.name,
-      category: t.category,
-      vegType: t.vegType,
-      estimatedPriceMin: min,
-      estimatedPriceMax: max,
-      currency,
-      confidence: spend.confidence,
-      basis: itemBasis,
-      sourceNote: note,
+  return templates
+    .filter((t) => {
+      if (strictVeg && t.vegType === 'non_veg') return false
+      return true
+    })
+    .map((t) => {
+      const min = Math.max(1, Math.round(spend.perPersonMin * t.share))
+      const max = Math.max(min + 1, Math.round(spend.perPersonMax * t.share))
+      return {
+        name: t.name,
+        category: t.category,
+        vegType: t.vegType,
+        estimatedPriceMin: min,
+        estimatedPriceMax: max,
+        currency,
+        confidence: spend.confidence,
+        basis: itemBasis,
+        sourceNote: note,
+      }
+    })
+}
+
+// ── Score-based candidate selection (PART 3) ─────────────────────────────────
+
+/**
+ * Score search result candidates by rating, review count, and dietary match.
+ * Returns the best candidate for the user's preferences without fetching extra API calls.
+ */
+function selectBestCandidate(
+  results: PlaceSearchResult[],
+  foodPreferences: FoodPreference[],
+  foodBudgetStyle: string | undefined,
+): PlaceSearchResult {
+  if (results.length <= 1) return results[0]!
+
+  const wantVeg = foodPreferences.some((p) => ['vegetarian', 'jain', 'vegan'].includes(p))
+  const wantNonVeg = foodPreferences.includes('non_vegetarian')
+  const wantBoth = wantVeg && wantNonVeg
+
+  const scored = results.map((r) => {
+    let score = 0
+
+    // Rating (0–40 pts)
+    if (r.rating != null) {
+      score += Math.max(0, ((r.rating - 3.0) / 2.0)) * 40
     }
+
+    // Review count (0–15 pts, log scale)
+    if (r.userRatingsTotal != null && r.userRatingsTotal > 0) {
+      score += Math.min(15, Math.log10(r.userRatingsTotal) * 5)
+    }
+
+    // Dietary match (0–30 pts)
+    const profile = detectDietaryProfile(r.name, r.types ?? [])
+    if (wantBoth) {
+      if (profile === 'mixed') score += 25
+      else if (profile === 'non_veg_friendly') score += 20
+      else if (profile === 'pure_veg') score += 10
+    } else if (wantVeg && !wantNonVeg) {
+      if (profile === 'pure_veg') score += 30
+      else if (profile === 'cafe' || profile === 'dessert') score += 20
+      else if (profile === 'mixed') score += 15
+    } else if (wantNonVeg && !wantVeg) {
+      if (profile === 'non_veg_friendly' || profile === 'mixed') score += 30
+    } else {
+      if (profile === 'mixed') score += 10
+    }
+
+    // Price level match (0–10 pts)
+    const pl = r.priceLevel
+    if (pl != null && foodBudgetStyle) {
+      const mismatch =
+        (foodBudgetStyle === 'budget' && pl > 2) ||
+        (foodBudgetStyle === 'premium' && pl < 3) ||
+        (foodBudgetStyle === 'mid_range' && (pl < 2 || pl > 3))
+      if (!mismatch) score += 10
+    }
+
+    return { result: r, score }
   })
+
+  scored.sort((a, b) => b.score - a.score)
+  return scored[0]!.result
 }
 
 // ── Reason tag builder ─────────────────────────────────────────────────────
@@ -288,6 +653,7 @@ function buildReasonTags(
   priceLevel: number | undefined,
   types: string[] | undefined,
   basis: SpendBasis,
+  dietaryProfile: DietaryProfile,
 ): string[] {
   const tags: string[] = ['Google-verified']
   if (rating != null) {
@@ -299,11 +665,10 @@ function buildReasonTags(
     const priceTag = ['Free', 'Budget-friendly', 'Mid-range', 'Premium', 'Luxury'][priceLevel]
     if (priceTag) tags.push(priceTag)
   }
-  if (types) {
-    if (types.some((t) => t.includes('vegetarian'))) tags.push('Vegetarian-friendly')
-    if (types.some((t) => t.includes('cafe') || t.includes('coffee'))) tags.push('Café')
-    if (types.some((t) => t.includes('fast_food'))) tags.push('Quick service')
-  }
+  if (dietaryProfile === 'pure_veg') tags.push('Pure veg')
+  else if (types?.some((t) => t.includes('vegetarian'))) tags.push('Vegetarian-friendly')
+  if (dietaryProfile === 'cafe' || types?.some((t) => t.includes('cafe') || t.includes('coffee'))) tags.push('Café')
+  if (types?.some((t) => t.includes('fast_food'))) tags.push('Quick service')
   return tags
 }
 
@@ -315,15 +680,31 @@ function buildFoodSearchQuery(
   suggestedQuery: string | undefined,
   foodPreferences: FoodPreference[],
   destination: string,
+  cuisineRegion: CuisineRegion,
 ): string {
-  if (suggestedQuery && suggestedQuery.toLowerCase().includes('restaurant')) return suggestedQuery
-  if (suggestedQuery && suggestedQuery.toLowerCase().includes('café')) return suggestedQuery
+  if (suggestedQuery && (suggestedQuery.toLowerCase().includes('restaurant') || suggestedQuery.toLowerCase().includes('café') || suggestedQuery.toLowerCase().includes('cafe'))) {
+    return suggestedQuery
+  }
 
   const isCafe = mealType === 'cafe' || activityTitle.toLowerCase().includes('café') || activityTitle.toLowerCase().includes('cafe')
   const isVeg = foodPreferences.includes('vegetarian') || foodPreferences.includes('vegan') || foodPreferences.includes('jain')
-  const isNonVeg = foodPreferences.includes('non_vegetarian')
 
-  const foodType = isCafe ? 'café' : isVeg ? 'vegetarian restaurant' : isNonVeg ? 'restaurant' : 'restaurant'
+  if (isCafe) return `café ${destination}`
+
+  if (cuisineRegion === 'ne_india') {
+    return isVeg ? `vegetarian restaurant momo thukpa ${destination}` : `local restaurant momo ${destination}`
+  }
+  if (cuisineRegion === 'bengali') {
+    return isVeg ? `vegetarian Bengali restaurant ${destination}` : `Bengali restaurant ${destination}`
+  }
+  if (cuisineRegion === 'south_indian') {
+    return isVeg ? `vegetarian South Indian restaurant ${destination}` : `restaurant ${destination}`
+  }
+  if (cuisineRegion === 'goan') {
+    return isVeg ? `vegetarian restaurant ${destination}` : `seafood fish curry restaurant ${destination}`
+  }
+
+  const foodType = isVeg ? 'vegetarian restaurant' : 'restaurant'
   return `${foodType} ${destination}`
 }
 
@@ -344,7 +725,6 @@ interface RequestBody {
   currency: string
   foodPreferences?: FoodPreference[]
   foodBudgetStyle?: 'budget' | 'mid_range' | 'premium'
-  /** Only food activities (category === 'food') should be included. */
   foodActivities: FoodActivity[]
 }
 
@@ -364,11 +744,11 @@ export interface FoodEnrichmentPatch {
   spendConfidence: 'low' | 'medium' | 'high'
   spendBasis: SpendBasis
   reasonTags: string[]
-  /** Per-item price estimates with explicit source + confidence. */
   suggestedItems: SuggestedFoodItem[]
-  /** Menu/website URL from Place Details (never scraped). */
   menuSourceUrl?: string
   menuSourceType?: 'google_place_website' | 'google_place_menu' | 'unknown'
+  /** Set when the restaurant is a pure-veg establishment. */
+  dietaryNote?: string
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -396,17 +776,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'destination_required' }, { status: 400 })
   }
 
-  // Cap to avoid abuse: maximum 12 food activities.
+  const cuisineRegion = detectCuisineRegion(destination)
   const targets = foodActivities.slice(0, 12)
-
   const patches: FoodEnrichmentPatch[] = []
-  // Deduplicate queries within a single request to save quota.
   const queryCache = new Map<string, Awaited<ReturnType<typeof searchPlaces>>>()
-  // Cache Place Details per placeId so repeated picks don't re-fetch.
   const detailsCache = new Map<string, Awaited<ReturnType<typeof fetchPlaceDetails>>>()
 
   for (const fa of targets) {
-    const query = buildFoodSearchQuery(fa.title, fa.mealType, fa.suggestedPlaceSearchQuery, foodPreferences, destination)
+    const query = buildFoodSearchQuery(fa.title, fa.mealType, fa.suggestedPlaceSearchQuery, foodPreferences, destination, cuisineRegion)
 
     let results = queryCache.get(query)
     if (!results) {
@@ -414,30 +791,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         results = await searchPlaces(query, { maxResults: 3 })
         queryCache.set(query, results)
       } catch {
-        continue // skip this activity on API failure — continue with others
+        continue
       }
     }
 
-    const top = results[0]
-    if (!top) continue
+    if (!results || results.length === 0) continue
 
-    // Fetch Place Details for the SELECTED top candidate only (website + reviews).
+    // Score candidates and pick the best match for user preferences
+    const top = selectBestCandidate(results, foodPreferences, foodBudgetStyle)
+
     let details = detailsCache.get(top.placeId)
     if (details === undefined) {
-      details = await fetchPlaceDetails(top.placeId) // fails soft → null
+      details = await fetchPlaceDetails(top.placeId)
       detailsCache.set(top.placeId, details)
     }
 
+    const dietaryProfile = detectDietaryProfile(details?.name ?? top.name, details?.types ?? top.types)
     const reviewClue = scanReviewPriceClues(details?.reviews)
+    const reviewMentions = scanReviewItemMentions(details?.reviews, cuisineRegion)
     const priceLevel = details?.priceLevel ?? top.priceLevel
     const spend = estimateSpend(priceLevel, foodBudgetStyle, travellerCount, currency, reviewClue)
-    const tags = buildReasonTags(details?.rating ?? top.rating, priceLevel, details?.types ?? top.types, spend.basis)
-    const suggestedItems = buildSuggestedItems(fa.mealType, foodPreferences, spend, currency)
+    const tags = buildReasonTags(details?.rating ?? top.rating, priceLevel, details?.types ?? top.types, spend.basis, dietaryProfile)
+    const suggestedItems = buildSuggestedItems(fa.mealType, foodPreferences, spend, currency, cuisineRegion, dietaryProfile, reviewMentions)
 
     const menuSourceUrl = details?.websiteUri
     const menuSourceType: FoodEnrichmentPatch['menuSourceType'] | undefined = menuSourceUrl
       ? 'google_place_website'
       : undefined
+
+    const dietaryNote =
+      dietaryProfile === 'pure_veg'
+        ? 'Pure veg restaurant — non-veg dishes not suggested here.'
+        : undefined
 
     patches.push({
       dayIdx: fa.dayIdx,
@@ -462,6 +847,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       reasonTags: tags,
       suggestedItems,
       ...(menuSourceUrl ? { menuSourceUrl, menuSourceType } : {}),
+      ...(dietaryNote ? { dietaryNote } : {}),
     })
   }
 

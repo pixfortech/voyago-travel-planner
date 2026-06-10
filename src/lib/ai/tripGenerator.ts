@@ -47,6 +47,38 @@ REAL PLACES — THE MOST IMPORTANT RULE:
   make the title a clear, specific search intent (e.g. "Best momos restaurant near MG Marg")
   so it can be resolved against Google Places before use. Do this rarely.
 
+ARRIVAL ACTIVITY — IMPORTANT:
+- When the transport context specifies a train or flight arriving at a station/airport,
+  the FIRST activity on Day 1 MUST be an arrival activity:
+    • category: "transport"
+    • title: "Arrival at [Station/Airport Name]" (e.g. "Arrival at New Jalpaiguri Railway Station")
+    • startTime: use the arrival time if known (from transport context), else "06:00"
+    • estimatedDurationMinutes: 15–30
+    • isBreak: false
+    • description: "Arrive and collect luggage. Transfer to accommodation."
+  Immediately after: add a "Transfer to hotel / check-in" activity (category: "transport",
+  ~30–45 min, startTime = arrival + 15 min).
+  Then, BEFORE sightseeing, add at minimum a "Freshen up / rest break" (category: "leisure",
+  15–30 min) so the traveller can settle in.
+
+SMART TIMING AFTER ARRIVAL:
+- Use the train/flight ARRIVAL TIME as the anchor for Day 1's schedule.
+- If the train arrives after 18:00: Day 1 should be ONLY arrival + check-in + dinner.
+  No sightseeing on a late-arrival day unless pace = "packed".
+- If the train arrives 12:00–18:00: plan arrival + check-in + 1 sightseeing stop (optional) + dinner.
+- If the train arrives before 12:00: plan a full day with check-in buffer first.
+- For overnight trains arriving early morning (e.g. 06:00–09:00): add a "Freshen up / rest"
+  break of 45–60 min after check-in before starting sightseeing.
+
+SMART SCHEDULING RULES:
+- NEVER schedule sightseeing in the first 1–2 hours after a long train journey (> 4 hrs),
+  unless pace = "packed". Always insert a rest/check-in buffer first.
+- Family or group trips (type: family, group, office, wedding): add a 30-min buffer gap
+  between arrival and first sightseeing, in addition to check-in time.
+- Groups of 8 or more: add 15 extra min for every logistical activity (check-in, transfers,
+  meals) to account for coordination overhead. Note this in the day's "restBreaks" field.
+- Pilgrimage trips: allow extra time at each spiritual site; avoid rushing between temples.
+
 Other hard rules:
 - Plan ONLY within the given trip dates. Never invent days outside the range.
 - Respect the traveller composition. If seniors or kids are present, reduce walking,
@@ -86,7 +118,8 @@ function compositionLine(input: TripGeneratorInput): string {
 
 /**
  * Build transport context block. Context-only — AI must not claim confirmed
- * bookings or invent PNR/ticket status.
+ * bookings or invent PNR/ticket status. Includes timing hints when available
+ * from the local train seed so the AI can anchor Day 1 scheduling.
  */
 function transportContextBlock(input: TripGeneratorInput): string {
   const t = input.transportContext
@@ -98,10 +131,13 @@ function transportContextBlock(input: TripGeneratorInput): string {
 
   // Outbound leg
   let legDesc = `${travelType} by ${modeLabel}`
+  let arrivalStationName = ''
   if (t.fromStation && t.toStation) {
     legDesc += ` from ${t.fromStation.city} (${t.fromStation.code}) to ${t.toStation.city} (${t.toStation.code})`
+    arrivalStationName = `${t.toStation.name} (${t.toStation.code})`
   } else if (t.fromAirport && t.toAirport) {
     legDesc += ` from ${t.fromAirport.city} (${t.fromAirport.iataCode}) to ${t.toAirport.city} (${t.toAirport.iataCode})`
+    arrivalStationName = `${t.toAirport.name} (${t.toAirport.iataCode})`
   } else if (t.fromCity && t.toCity) {
     legDesc += ` from ${t.fromCity} to ${t.toCity}`
   }
@@ -110,30 +146,64 @@ function transportContextBlock(input: TripGeneratorInput): string {
 
   if (t.trainNumber) {
     const trainLabel = t.trainName ? `${t.trainName} (${t.trainNumber})` : `Train ${t.trainNumber}`
-    lines.push(`Train: ${trainLabel}.`)
+    let trainLine = `Train: ${trainLabel}.`
+    if (t.trainDepartureTime && t.trainArrivalTime) {
+      trainLine += ` Departs ~${t.trainDepartureTime}, arrives ~${t.trainArrivalTime} (approximate; verify on NTES before travel).`
+    } else if (t.trainDepartureTime) {
+      trainLine += ` Departs ~${t.trainDepartureTime} (approximate).`
+    } else if (t.trainArrivalTime) {
+      trainLine += ` Arrives ~${t.trainArrivalTime} (approximate).`
+    } else {
+      trainLine += ` Timing not available in local seed — verify before travel.`
+    }
+    if (t.trainDaysOfRun) trainLine += ` Runs: ${t.trainDaysOfRun}.`
+    lines.push(trainLine)
     if (t.trainRouteWarning) {
       lines.push(`⚠ Route note: ${t.trainRouteWarning} Advise the user to verify this selection.`)
     }
   }
 
+  // Arrival instruction — tells the AI what arrival activity to add
+  if (arrivalStationName && t.trainArrivalTime) {
+    lines.push(`ARRIVAL INSTRUCTION: The traveller arrives at "${arrivalStationName}" at approximately ${t.trainArrivalTime} on Day 1. Add an "Arrival at ${arrivalStationName}" activity as the FIRST item of Day 1, startTime: "${t.trainArrivalTime}", category: "transport". Then add transfer + check-in. Do NOT schedule sightseeing until after check-in unless pace is "packed".`)
+  } else if (arrivalStationName) {
+    lines.push(`ARRIVAL INSTRUCTION: The traveller arrives at "${arrivalStationName}" (arrival time not known — use "08:00" as placeholder). Add an arrival activity as the first item of Day 1, category: "transport". Then add transfer + check-in.`)
+  }
+
   // Return leg
   if (t.travelType === 'round_trip') {
     let returnDesc = 'return leg'
+    let departureStationName = ''
     if (t.returnFromStation && t.returnToStation) {
       returnDesc = `return from ${t.returnFromStation.city} (${t.returnFromStation.code}) to ${t.returnToStation.city} (${t.returnToStation.code})`
+      departureStationName = `${t.returnFromStation.name} (${t.returnFromStation.code})`
     } else if (t.returnFromAirport && t.returnToAirport) {
       returnDesc = `return from ${t.returnFromAirport.city} (${t.returnFromAirport.iataCode}) to ${t.returnToAirport.city} (${t.returnToAirport.iataCode})`
+      departureStationName = `${t.returnFromAirport.name} (${t.returnFromAirport.iataCode})`
     } else if (t.returnFromCity && t.returnToCity) {
       returnDesc = `return from ${t.returnFromCity} to ${t.returnToCity}`
     }
     lines.push(`Return: ${returnDesc}.`)
     if (t.returnTrainNumber) {
       const rl = t.returnTrainName ? `${t.returnTrainName} (${t.returnTrainNumber})` : `Train ${t.returnTrainNumber}`
-      lines.push(`Return train: ${rl}.`)
+      let returnTrainLine = `Return train: ${rl}.`
+      if (t.returnTrainDepartureTime && t.returnTrainArrivalTime) {
+        returnTrainLine += ` Departs ~${t.returnTrainDepartureTime}, arrives ~${t.returnTrainArrivalTime} (approximate).`
+      } else if (t.returnTrainDepartureTime) {
+        returnTrainLine += ` Departs ~${t.returnTrainDepartureTime} (approximate).`
+      } else {
+        returnTrainLine += ` Timing not available in local seed — verify before travel.`
+      }
+      if (t.returnTrainDaysOfRun) returnTrainLine += ` Runs: ${t.returnTrainDaysOfRun}.`
+      lines.push(returnTrainLine)
+    }
+    // Departure instruction for last day
+    if (departureStationName && t.returnTrainDepartureTime) {
+      lines.push(`DEPARTURE INSTRUCTION: On the last day, the traveller departs from "${departureStationName}" at ~${t.returnTrainDepartureTime}. Plan the last day to end at the station with time to spare (arrive at station ~30 min before departure). Schedule accordingly — do not add sightseeing that would conflict with this departure.`)
     }
   }
 
-  lines.push('Use transport context for geographic planning (e.g. plan arrival/departure day around the station/airport). Do NOT claim any ticket is booked or confirmed.')
+  lines.push('Use transport context for geographic planning only. Do NOT claim any ticket is booked, confirmed, or guaranteed.')
   return lines.join('\n')
 }
 

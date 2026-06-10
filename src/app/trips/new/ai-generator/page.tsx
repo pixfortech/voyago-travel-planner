@@ -22,7 +22,7 @@ import { categoryToActivityType } from '@/lib/maps/categoryMapping'
 import { type IndiaCity, searchCities } from '@/data/indiaCities'
 import { type IndiaRailwayStation, searchRailwayStations } from '@/data/indiaRailwayStations'
 import { type IndiaAirport, searchAirports } from '@/data/indiaAirports'
-import { type IndiaTrainData, searchTrains, validateTrainRoute } from '@/data/indiaTrains'
+import { type IndiaTrainData, searchTrains, validateTrainRoute, fetchTrainDetails, getSuggestedReturnTrain } from '@/data/indiaTrains'
 import type {
   TripType, TripGenerationPreferences, TripInterest, FoodPreference,
   TravelPace, TripGeneratorInput, TripGeneratorResult, GeneratedActivity, Activity,
@@ -712,12 +712,14 @@ export default function NewTripAiGeneratorPage() {
   function applyReverseReturn() {
     setBrief((p) => {
       if (p.transport.mode === 'train') {
+        // Auto-suggest the paired reverse train from the seed if available
+        const reverseTrain = p.trainNumber ? getSuggestedReturnTrain(p.trainNumber) : null
         return {
           ...p,
           returnFromStation: p.toStation,
           returnToStation: p.fromStation,
-          returnTrainNumber: undefined,
-          returnTrainName: undefined,
+          returnTrainNumber: reverseTrain?.trainNumber || undefined,
+          returnTrainName: reverseTrain?.trainName || undefined,
         }
       }
       if (p.transport.mode === 'flight') {
@@ -870,6 +872,15 @@ export default function NewTripAiGeneratorPage() {
           trainNumber: brief.trainNumber || undefined,
           trainName: brief.trainName || undefined,
           trainRouteWarning: brief.trainRouteWarning || undefined,
+          // Look up timing from local seed — advisory only, never claimed as confirmed
+          ...(brief.trainNumber ? (() => {
+            const td = fetchTrainDetails(brief.trainNumber)
+            return td ? {
+              trainDepartureTime: td.departureTime || undefined,
+              trainArrivalTime: td.arrivalTime || undefined,
+              trainDaysOfRun: td.daysOfRun || undefined,
+            } : {}
+          })() : {}),
           ...(brief.transportTravelType === 'round_trip' ? {
             returnFromStation: brief.returnFromStation
               ? { name: brief.returnFromStation.name, code: brief.returnFromStation.code, city: brief.returnFromStation.city, state: brief.returnFromStation.state }
@@ -887,6 +898,15 @@ export default function NewTripAiGeneratorPage() {
             returnToCity: brief.returnToCity || undefined,
             returnTrainNumber: brief.returnTrainNumber || undefined,
             returnTrainName: brief.returnTrainName || undefined,
+            // Return train timing from seed
+            ...(brief.returnTrainNumber ? (() => {
+              const rtd = fetchTrainDetails(brief.returnTrainNumber)
+              return rtd ? {
+                returnTrainDepartureTime: rtd.departureTime || undefined,
+                returnTrainArrivalTime: rtd.arrivalTime || undefined,
+                returnTrainDaysOfRun: rtd.daysOfRun || undefined,
+              } : {}
+            })() : {}),
           } : {}),
         }
       }
@@ -1009,6 +1029,10 @@ export default function NewTripAiGeneratorPage() {
           suggestedItems: patch.suggestedItems,
           menuSourceUrl: patch.menuSourceUrl,
           menuSourceType: patch.menuSourceType,
+          // Append dietary note to foodInsightNotes when present
+          foodInsightNotes: patch.dietaryNote
+            ? [act.foodInsightNotes, patch.dietaryNote].filter(Boolean).join(' ')
+            : act.foodInsightNotes,
           // Keep the AI cost estimate unless we have a better range-based figure.
           estimatedCost: patch.estimatedSpendRange.min > 0 ? Math.round((patch.estimatedSpendRange.min + patch.estimatedSpendRange.max) / 2) : act.estimatedCost,
           estimatedCostPerPerson: patch.estimatedSpendRange.perPersonMin > 0
@@ -1862,9 +1886,27 @@ export default function NewTripAiGeneratorPage() {
                       <p className="text-[11px] text-amber-700 leading-relaxed">{brief.trainRouteWarning}</p>
                     </div>
                   )}
-                  {brief.trainNumber && !brief.trainRouteWarning && (
-                    <p className="text-[11px] text-gray-400">Train data is from a small seed — always verify the route and availability at IRCTC before booking.</p>
-                  )}
+                  {/* Train timing display — approximate, from local seed */}
+                  {brief.trainNumber && (() => {
+                    const td = fetchTrainDetails(brief.trainNumber)
+                    if (!td) return (
+                      <p className="text-[11px] text-gray-400">Train not in local seed — timing not available. Verify at IRCTC.</p>
+                    )
+                    const timing = td.departureTime && td.arrivalTime
+                      ? `Dep ${td.departureTime} → Arr ${td.arrivalTime}`
+                      : td.departureTime
+                        ? `Dep ${td.departureTime}`
+                        : 'Timing not available in seed'
+                    return (
+                      <p className="text-[11px] text-gray-500">
+                        <span className="font-semibold">{td.trainName} ({td.trainNumber})</span>
+                        {' · '}{td.routeDescription}
+                        {' · '}{timing}
+                        {td.daysOfRun ? ` · Runs: ${td.daysOfRun}` : ''}
+                        <span className="text-gray-400"> — approx.; verify at IRCTC</span>
+                      </p>
+                    )
+                  })()}
                 </div>
               )}
 
@@ -1960,6 +2002,25 @@ export default function NewTripAiGeneratorPage() {
                         <Input label="Return train no. (optional)" placeholder="e.g. 12378" value={brief.returnTrainNumber || ''} onChange={(e) => setBrief((p) => ({ ...p, returnTrainNumber: e.target.value }))} />
                         <Input label="Return train name" placeholder="e.g. Padatik Express" value={brief.returnTrainName || ''} onChange={(e) => setBrief((p) => ({ ...p, returnTrainName: e.target.value }))} />
                       </div>
+                      {/* Return train timing — from local seed */}
+                      {brief.returnTrainNumber && (() => {
+                        const rtd = fetchTrainDetails(brief.returnTrainNumber)
+                        if (!rtd) return (
+                          <p className="text-[11px] text-gray-400">Return train not in local seed — verify timing at IRCTC.</p>
+                        )
+                        const timing = rtd.departureTime && rtd.arrivalTime
+                          ? `Dep ${rtd.departureTime} → Arr ${rtd.arrivalTime}`
+                          : rtd.departureTime ? `Dep ${rtd.departureTime}` : 'Timing not available in seed'
+                        return (
+                          <p className="text-[11px] text-gray-500">
+                            <span className="font-semibold">{rtd.trainName} ({rtd.trainNumber})</span>
+                            {' · '}{rtd.routeDescription}
+                            {' · '}{timing}
+                            {rtd.daysOfRun ? ` · Runs: ${rtd.daysOfRun}` : ''}
+                            <span className="text-gray-400"> — approx.; verify at IRCTC</span>
+                          </p>
+                        )
+                      })()}
                     </div>
                   )}
                   {brief.transport.mode === 'flight' && (
