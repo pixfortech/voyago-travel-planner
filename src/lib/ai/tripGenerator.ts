@@ -112,6 +112,30 @@ function stayContextBlock(input: TripGeneratorInput): string {
   return input.stayBase ? `Stay / base location (start & end each day near here): ${input.stayBase}` : ''
 }
 
+/**
+ * Build the structured destination block (Phase 16C). Anchors the AI to an
+ * exact city/state, avoids same-name confusion, and passes nearest known
+ * station/airport as geographic context only (never as bookings).
+ */
+function destinationContextBlock(input: TripGeneratorInput): string {
+  const lines: string[] = []
+  const d = input.destinationStructured
+  if (d?.city) {
+    const coords = d.lat != null && d.lng != null ? ` (approx ${d.lat.toFixed(4)}, ${d.lng.toFixed(4)})` : ''
+    lines.push(`Canonical destination: ${d.city}${d.state ? `, ${d.state}` : ''}, ${d.country ?? 'India'}${coords}.`)
+    lines.push('Treat THIS exact city and state as the destination. Do NOT confuse it with similarly-named places elsewhere. Bias every place suggestion to this city and its immediate region.')
+  }
+  if (input.nearestRailwayStation) {
+    const s = input.nearestRailwayStation
+    lines.push(`Nearest railway station the traveller noted: ${s.name} (${s.code}), ${s.city}, ${s.state}. Use only as geographic context — do NOT claim a train ticket/booking unless the traveller explicitly provided one.`)
+  }
+  if (input.nearestAirport) {
+    const a = input.nearestAirport
+    lines.push(`Nearest airport the traveller noted: ${a.name} (${a.iataCode}), ${a.city}, ${a.state}. Use only as geographic context — do NOT claim a flight/booking unless the traveller explicitly provided one.`)
+  }
+  return lines.join('\n')
+}
+
 export function buildTripGeneratorUserMessage(input: TripGeneratorInput): string {
   const p = input.preferences
   const existing = input.existingDays?.length
@@ -124,6 +148,7 @@ export function buildTripGeneratorUserMessage(input: TripGeneratorInput): string
     : '(no existing activities)'
 
   return `Destination: ${input.destination}
+${destinationContextBlock(input)}
 Dates: ${input.startDate} → ${input.endDate} (${input.dayCount} day(s))
 Today: ${input.today}
 Trip type: ${input.tripType}

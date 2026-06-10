@@ -12,18 +12,22 @@ import AppShell from '@/components/layout/AppShell'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import PlacePicker, { type SelectedPlace } from '@/components/maps/PlacePicker'
+import SearchableSelect from '@/components/ui/SearchableSelect'
 import GeneratedItineraryPreview, {
   type EditableGeneratedDay, type PreviewBudgetContext,
 } from '@/components/ai/GeneratedItineraryPreview'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import { getDayCount } from '@/lib/utils'
 import { categoryToActivityType } from '@/lib/maps/categoryMapping'
+import { type IndiaCity, searchCities } from '@/data/indiaCities'
+import { type IndiaRailwayStation, searchRailwayStations } from '@/data/indiaRailwayStations'
+import { type IndiaAirport, searchAirports } from '@/data/indiaAirports'
 import type {
   TripType, TripGenerationPreferences, TripInterest, FoodPreference,
   TravelPace, TripGeneratorInput, TripGeneratorResult, Activity,
   BudgetInclusion, BudgetCategoryKey, PlannedTransport, PlannedStay,
   AccommodationDraft, StayType, StayMealPlan, StayCostMode, StayChoice,
-  TripGeneratorAccommodation,
+  TripGeneratorAccommodation, StructuredDestination, RailwayStationRef, AirportRef,
 } from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -43,7 +47,12 @@ type InputMode = 'full-prompt' | 'guided' | 'smart-form'
 
 interface TripBrief {
   tripName: string
-  destination: string
+  destination: string                  // canonical free-text (kept for back-compat)
+  // Phase 16C — structured destination + nearest station/airport
+  destinationStructured?: StructuredDestination
+  destinationSource: 'dataset' | 'custom'
+  railwayStation?: RailwayStationRef
+  airport?: AirportRef
   origin: string
   startDate: string
   endDate: string
@@ -145,6 +154,7 @@ function defaultBrief(): TripBrief {
   return {
     tripName: '',
     destination: '',
+    destinationSource: 'custom',
     origin: '',
     startDate: '',
     endDate: '',
@@ -513,6 +523,36 @@ export default function NewTripAiGeneratorPage() {
     setBrief((p) => ({ ...p, accommodation: { ...p.accommodation, ...patch } }))
   }
 
+  // ── Phase 16C — structured destination / station / airport selection ─────
+  function selectCity(c: IndiaCity) {
+    setBrief((p) => ({
+      ...p,
+      destination: `${c.city}, ${c.state}`,
+      destinationStructured: { city: c.city, state: c.state, country: 'India', lat: c.lat, lng: c.lng, aliases: c.aliases },
+      destinationSource: 'dataset',
+    }))
+    setBriefErrors((e) => ({ ...e, destination: '' }))
+  }
+  function setCustomDestination(text: string) {
+    const t = text.trim()
+    setBrief((p) => ({
+      ...p,
+      destination: t,
+      destinationStructured: t ? { city: t, state: '', country: 'India' } : undefined,
+      destinationSource: 'custom',
+    }))
+    setBriefErrors((e) => ({ ...e, destination: '' }))
+  }
+  function clearDestination() {
+    setBrief((p) => ({ ...p, destination: '', destinationStructured: undefined, destinationSource: 'custom' }))
+  }
+  function selectStation(s: IndiaRailwayStation) {
+    setBrief((p) => ({ ...p, railwayStation: { ...s, source: 'dataset' } }))
+  }
+  function selectAirport(a: IndiaAirport) {
+    setBrief((p) => ({ ...p, airport: { ...a, source: 'dataset' } }))
+  }
+
   // ── Parse NL prompt → brief ────────────────────────────────────────────
 
   async function handleParsePrompt() {
@@ -607,6 +647,18 @@ export default function NewTripAiGeneratorPage() {
           ? { chosen: false, areaPreference: acc.areaPreference?.trim() || undefined }
           : { chosen: false }
 
+    // Phase 16C — structured destination + nearest station/airport (context only).
+    const ds = brief.destinationStructured
+    const destinationStructured = ds?.city
+      ? { city: ds.city, state: ds.state, country: 'India' as const, lat: ds.lat, lng: ds.lng }
+      : undefined
+    const nearestRailwayStation = brief.railwayStation
+      ? { name: brief.railwayStation.name, code: brief.railwayStation.code, city: brief.railwayStation.city, state: brief.railwayStation.state }
+      : undefined
+    const nearestAirport = brief.airport
+      ? { name: brief.airport.name, iataCode: brief.airport.iataCode, city: brief.airport.city, state: brief.airport.state }
+      : undefined
+
     const input: TripGeneratorInput = {
       destination: brief.destination.trim(),
       startDate: brief.startDate,
@@ -623,6 +675,10 @@ export default function NewTripAiGeneratorPage() {
       existingDays: [],
       stayBase,
       accommodation,
+      destinationStructured,
+      destinationSource: brief.destinationSource,
+      nearestRailwayStation,
+      nearestAirport,
     }
 
     setGenError(null)
@@ -1224,11 +1280,21 @@ export default function NewTripAiGeneratorPage() {
 
             <div className="space-y-3">
               <Input label="Trip name (optional)" placeholder={brief.destination ? `${brief.destination} Trip` : 'e.g. Summer Goa Trip'} value={brief.tripName} onChange={(e) => setBrief((p) => ({ ...p, tripName: e.target.value }))} />
-              <Input
+              {/* Phase 16C — structured city/state destination with custom fallback */}
+              <SearchableSelect<IndiaCity>
                 label="Destination *"
-                placeholder="e.g. Goa, India"
-                value={brief.destination}
-                onChange={(e) => { setBrief((p) => ({ ...p, destination: e.target.value })); setBriefErrors((e2) => ({ ...e2, destination: '' })) }}
+                placeholder="Search a city — e.g. Gangtok, Darjeeling, Puri"
+                search={(q) => searchCities(q)}
+                getKey={(c) => `${c.city}-${c.state}`}
+                renderPrimary={(c) => `${c.city}, ${c.state}`}
+                renderSecondary={(c) => c.country}
+                onSelect={selectCity}
+                selectedPrimary={brief.destination || null}
+                selectedSecondary={brief.destinationStructured?.state ? `${brief.destinationStructured.country}` : undefined}
+                selectedBadge={brief.destinationSource === 'dataset' ? 'Dataset' : 'Custom'}
+                onClear={clearDestination}
+                allowCustom
+                onCustom={setCustomDestination}
                 error={briefErrors.destination}
               />
               <Input label="Starting from (optional)" placeholder="e.g. Mumbai" value={brief.origin} onChange={(e) => setBrief((p) => ({ ...p, origin: e.target.value }))} />
@@ -1376,6 +1442,44 @@ export default function NewTripAiGeneratorPage() {
                   <Input label="From" placeholder="Origin" value={brief.transport.origin || ''} onChange={(e) => setTransport({ origin: e.target.value })} />
                   <Input label="To" placeholder="Destination" value={brief.transport.destination || ''} onChange={(e) => setTransport({ destination: e.target.value })} />
                 </div>
+
+                {/* Phase 16C — arrival station/airport selector (geographic context;
+                    full transport budget arrives in Phase 16H). */}
+                {brief.transport.mode === 'train' && (
+                  <SearchableSelect<IndiaRailwayStation>
+                    label="Arrival railway station (optional)"
+                    placeholder="Search by name, code or city — e.g. NJP, Howrah"
+                    search={(q) => searchRailwayStations(q)}
+                    getKey={(s) => s.code}
+                    renderPrimary={(s) => `${s.name} (${s.code})`}
+                    renderSecondary={(s) => `${s.city}, ${s.state}`}
+                    onSelect={selectStation}
+                    selectedPrimary={brief.railwayStation ? `${brief.railwayStation.name} (${brief.railwayStation.code})` : null}
+                    selectedSecondary={brief.railwayStation ? `${brief.railwayStation.city}, ${brief.railwayStation.state}` : undefined}
+                    selectedBadge={brief.railwayStation?.source === 'dataset' ? 'Dataset' : 'Custom'}
+                    onClear={() => setBrief((p) => ({ ...p, railwayStation: undefined }))}
+                    allowCustom
+                    onCustom={(text) => setBrief((p) => ({ ...p, railwayStation: { name: text, code: '', city: '', state: '', source: 'custom' } }))}
+                  />
+                )}
+                {brief.transport.mode === 'flight' && (
+                  <SearchableSelect<IndiaAirport>
+                    label="Arrival airport (optional)"
+                    placeholder="Search by name, IATA or city — e.g. CCU, Bagdogra"
+                    search={(q) => searchAirports(q)}
+                    getKey={(a) => a.iataCode}
+                    renderPrimary={(a) => `${a.name} (${a.iataCode})`}
+                    renderSecondary={(a) => `${a.city}, ${a.state}`}
+                    onSelect={selectAirport}
+                    selectedPrimary={brief.airport ? `${brief.airport.name} (${brief.airport.iataCode})` : null}
+                    selectedSecondary={brief.airport ? `${brief.airport.city}, ${brief.airport.state}` : undefined}
+                    selectedBadge={brief.airport?.source === 'dataset' ? 'Dataset' : 'Custom'}
+                    onClear={() => setBrief((p) => ({ ...p, airport: undefined }))}
+                    allowCustom
+                    onCustom={(text) => setBrief((p) => ({ ...p, airport: { name: text, iataCode: '', city: '', state: '', source: 'custom' } }))}
+                  />
+                )}
+
                 <div className="grid grid-cols-2 gap-2">
                   <Input label="Total cost (optional)" type="number" min="0" placeholder="0" value={brief.transport.totalCost ? String(brief.transport.totalCost) : ''} onChange={(e) => setTransport({ totalCost: parseFloat(e.target.value) || undefined })} />
                   <Input label="Booking ref (optional)" placeholder="PNR / ref" value={brief.transport.bookingRef || ''} onChange={(e) => setTransport({ bookingRef: e.target.value })} />

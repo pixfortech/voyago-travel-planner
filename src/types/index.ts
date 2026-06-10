@@ -1446,6 +1446,15 @@ export interface TripGeneratorInput {
    * stay's lat/lng and must not ask for stay again.
    */
   accommodation?: TripGeneratorAccommodation
+  /**
+   * Phase 16C — structured destination so the AI uses the exact city/state and
+   * avoids same-name confusion. `destination` (string) stays canonical.
+   */
+  destinationStructured?: StructuredDestination
+  destinationSource?: 'dataset' | 'custom'
+  /** Nearest known station/airport — geographic context only (not bookings). */
+  nearestRailwayStation?: Pick<RailwayStationRef, 'name' | 'code' | 'city' | 'state'>
+  nearestAirport?: Pick<AirportRef, 'name' | 'iataCode' | 'city' | 'state'>
 }
 
 export type ActivityPriority = 'must' | 'recommended' | 'optional'
@@ -1625,6 +1634,40 @@ export interface AccommodationDraft {
   notes?: string
   /** Preferred area when no exact stay is chosen (suggest mode). */
   areaPreference?: string
+}
+
+// ── Phase 16C — structured destination / station / airport references ────────
+
+/** Structured city + state destination (backed by the local cities dataset). */
+export interface StructuredDestination {
+  city: string
+  state: string
+  country: 'India'
+  lat?: number
+  lng?: number
+  aliases?: string[]
+}
+
+/** A selected railway station (dataset match or custom free-text). */
+export interface RailwayStationRef {
+  name: string
+  code: string
+  city: string
+  state: string
+  lat?: number
+  lng?: number
+  source: 'dataset' | 'custom'
+}
+
+/** A selected airport (dataset match or custom free-text). */
+export interface AirportRef {
+  name: string
+  iataCode: string
+  city: string
+  state: string
+  lat?: number
+  lng?: number
+  source: 'dataset' | 'custom'
 }
 
 /** Privacy-safe accommodation context sent to the AI generator. */
