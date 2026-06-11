@@ -1894,4 +1894,13 @@ export interface GeneratedDayRoute {
   method: 'road' | 'haversine'
   /** True when the day's activities changed after this route was computed. */
   stale?: boolean
+  /**
+   * Outcome of the optimisation pass (Phase 16G PART 11):
+   *   optimised — real road-aware order, timings recalculated
+   *   fallback  — straight-line order used (live road data unavailable)
+   *   failed    — optimisation could not run; original order kept
+   */
+  optimiseStatus?: 'optimised' | 'fallback' | 'failed'
+  /** True once planned timings were recalculated for the optimised order. */
+  timingsUpdated?: boolean
 }

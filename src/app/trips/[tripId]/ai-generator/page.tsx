@@ -273,6 +273,7 @@ export default function AiGeneratorPage() {
             applying={applying}
             applyNote={applyNote}
             mapsAvailable={mapsStatus.available}
+            destinationContext={{ city: trip.destination }}
             onApply={handleApply}
             onDiscard={() => { setResult(null); setApplyNote(null) }}
             onRegenerate={handleRegenerate}

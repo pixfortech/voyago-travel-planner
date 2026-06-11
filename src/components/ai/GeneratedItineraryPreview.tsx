@@ -38,6 +38,14 @@ import { getDurationEstimate, buildDayTiming, fmtMins, parseHHMM } from '@/lib/a
 import type { TimingLeg } from '@/app/api/maps/itinerary-timing/route'
 import type { PlaceContextResponse } from '@/app/api/maps/place-context/route'
 import { buildContextWarnings, buildEssentialSuggestions, isOutdoorCategory } from '@/lib/context/essentials'
+import {
+  partitionForOptimise, applyFlexibleOrder, transitionBuffer, isDepartureAnchor,
+  validateChronology, anchorKind,
+} from '@/lib/ai/routePlanning'
+import {
+  checkElevationSanity, validateItinerary,
+  type ValidationActivity, type DestinationRef,
+} from '@/lib/ai/itineraryValidation'
 
 export interface EditableGeneratedActivity extends GeneratedActivity {
   _key: string
@@ -60,6 +68,9 @@ export interface EditableGeneratedActivity extends GeneratedActivity {
   _travelToNextDistText?: string  // "22 min"
   _travelToNextDistKm?: string    // "8.4 km"
   _travelRouteSource?: 'google_routes' | 'estimate'
+  // Phase 16G — group/weather travel buffer (PART 4)
+  _travelBufferMins?: number
+  _travelBufferNote?: string
   // Phase 16F — location context (elevation / weather / AQI) + derived warnings
   _activityContext?: ActivityContext
   // Phase 16D refinement — keys of suggested food items the user removed (excluded from budget)
@@ -77,6 +88,8 @@ export interface EditableGeneratedDay {
     activityMins: number
     travelMins: number
     paceWarning?: string
+    /** Phase 16G PART 2 — chronology validity + warning. */
+    chronoWarning?: string
   }
   // Phase 16F — day-level "what to carry" suggestions
   _essentials?: EssentialSuggestion[]
@@ -104,6 +117,8 @@ interface PreviewProps {
   autoEnrich?: boolean
   /** Optional budget split context (new-trip generator). */
   budgetContext?: PreviewBudgetContext
+  /** Phase 16G PART 12A — destination centre for boundary/elevation sanity checks. */
+  destinationContext?: { city?: string; lat?: number; lng?: number }
   onApply: (days: EditableGeneratedDay[]) => void
   onDiscard: () => void
   onRegenerate: () => void
@@ -247,7 +262,7 @@ function EssentialsBlock({ essentials }: { essentials?: EssentialSuggestion[] })
 export default function GeneratedItineraryPreview({
   result, currency, travellerCount, isMock, applying, applyNote, mapsAvailable,
   applyLabel = 'Apply to trip', applyingLabel = 'Applying…',
-  autoEnrich = false, budgetContext,
+  autoEnrich = false, budgetContext, destinationContext,
   onApply, onDiscard, onRegenerate,
 }: PreviewProps) {
   const [editDays, setEditDays] = useState<EditableGeneratedDay[]>([])
@@ -275,6 +290,10 @@ export default function GeneratedItineraryPreview({
   // Phase 16F — location context enrichment
   const [contextDone, setContextDone] = useState(false)
   const [timeZone, setTimeZone] = useState<TimeZoneContext | null>(null)
+  // Phase 16G PART 12A — destination is low-altitude (suppress impossible altitude advice)
+  const [lowAltitude, setLowAltitude] = useState(false)
+  // Two-step confirm when the itinerary has sanity issues before saving.
+  const [confirmSave, setConfirmSave] = useState(false)
 
   // Rebuild editable state whenever a new result arrives. commitDays keeps the
   // ref in sync synchronously so the auto-run effect sees fresh data.
@@ -295,6 +314,8 @@ export default function GeneratedItineraryPreview({
     setTimingDone(false)
     setContextDone(false)
     setTimeZone(null)
+    setLowAltitude(false)
+    setConfirmSave(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result])
 
@@ -447,73 +468,117 @@ export default function GeneratedItineraryPreview({
 
   // ── Per-day route optimisation ────────────────────────────────────────────
 
+  /**
+   * Optimise ONE day (PART 1). Splits the day into fixed anchors (arrival /
+   * departure / transfer / hotel) and flexible stops; only the flexible stops
+   * are reordered, routed FROM the bounding arrival/hotel anchor and TO the
+   * bounding departure/hotel anchor. After reordering, timing is recalculated
+   * (PART 11 — never leave stale timing). Returns the day's optimise status.
+   */
   async function optimiseDay(date: string, silent = false): Promise<void> {
     if (!silent) setOptimisingDay(date)
     const day = editDaysRef.current.find((d) => d.date === date)
     if (!day) { if (!silent) setOptimisingDay(null); return }
-    const points = day.activities
-      .filter((a) => !a._removed && a._lat != null && a._lng != null)
-      .map((a) => ({ id: a._key, name: a.title, lat: a._lat!, lng: a._lng! }))
 
-    if (points.length < 2) { if (!silent) setOptimisingDay(null); return }
+    const active = day.activities.filter((a) => !a._removed)
+    const part = partitionForOptimise(active)
+    const byKey = new Map(active.map((a) => [a._key, a]))
 
-    let origM = 0
-    for (let i = 0; i < points.length - 1; i++) origM += haversine(points[i]!, points[i + 1]!)
+    // Fewer than 2 flexible stops — nothing to reorder, but still (re)compute
+    // timing so planned times stay correct and chronological.
+    if (part.flexibleKeys.length < 2) {
+      const geocoded = active.filter((a) => a._lat != null && a._lng != null).length
+      setDayRoutes((prev) => ({
+        ...prev,
+        [date]: { stops: geocoded, distanceKm: prev[date]?.distanceKm ?? 0, durationText: prev[date]?.durationText ?? '—', method: prev[date]?.method ?? 'road', stale: false, optimiseStatus: 'optimised', timingsUpdated: true },
+      }))
+      if (!silent) { await enrichTiming(); setOptimisingDay(null) }
+      return
+    }
 
+    // Build the point list: bounding start anchor + flexible stops + bounding end anchor.
+    const points: Array<{ id: string; name: string; lat: number; lng: number }> = []
+    if (part.boundaryStart) points.push({ id: '__start__', name: part.boundaryStart.title, lat: part.boundaryStart._lat!, lng: part.boundaryStart._lng! })
+    for (const k of part.flexibleKeys) {
+      const a = byKey.get(k)!
+      points.push({ id: a._key, name: a.title, lat: a._lat!, lng: a._lng! })
+    }
+    if (part.boundaryEnd) points.push({ id: '__end__', name: part.boundaryEnd.title, lat: part.boundaryEnd._lat!, lng: part.boundaryEnd._lng! })
+
+    const keepLastFixed = !!part.boundaryEnd
+
+    let summary: GeneratedDayRoute
     try {
       const res = await fetch('/api/maps/route/optimise', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ points, travelMode: 'driving', mode: 'fastest', keepFirstFixed: true }),
+        body: JSON.stringify({ points, travelMode: 'driving', mode: 'fastest', keepFirstFixed: true, keepLastFixed }),
       })
 
-      let rank = new Map<string, number>()
-      let summary: GeneratedDayRoute
+      let rankedFlexible: string[]
 
       if (res.status === 503 || !res.ok) {
-        // Haversine nearest-neighbour fallback.
-        const order = [0]; const used = new Set([0])
-        while (order.length < points.length) {
-          const last = points[order[order.length - 1]!]!
-          let best = -1, bestD = Infinity
-          for (let i = 0; i < points.length; i++) {
-            if (used.has(i)) continue
-            const d = haversine(last, points[i]!)
-            if (d < bestD) { bestD = d; best = i }
-          }
-          if (best < 0) break
-          order.push(best); used.add(best)
-        }
+        // Haversine nearest-neighbour fallback over the flexible stops only.
+        rankedFlexible = haversineOrderFlexible(points, part.flexibleKeys)
         let optM = 0
-        for (let i = 0; i < order.length - 1; i++) optM += haversine(points[order[i]!]!, points[order[i + 1]!]!)
-        order.forEach((pi, idx) => rank.set(points[pi]!.id, idx))
-        summary = { stops: points.length, distanceKm: Math.round(optM / 100) / 10, durationText: '—', method: 'haversine', stale: false }
+        const seq = rankedFlexible.map((k) => points.find((p) => p.id === k)!)
+        for (let i = 0; i < seq.length - 1; i++) optM += haversine(seq[i]!, seq[i + 1]!)
+        summary = { stops: part.flexibleKeys.length, distanceKm: Math.round(optM / 100) / 10, durationText: '—', method: 'haversine', stale: false, optimiseStatus: 'fallback', timingsUpdated: true }
       } else {
         const data = await res.json() as OptimiseRouteResult
-        data.optimisedOrder.forEach((id, idx) => rank.set(id, idx))
+        rankedFlexible = data.optimisedOrder.filter((id) => id !== '__start__' && id !== '__end__')
         summary = {
-          stops: points.length,
+          stops: part.flexibleKeys.length,
           distanceKm: Math.round(data.optimisedRouteDistanceMeters / 100) / 10,
           durationText: fmtDuration(data.optimisedRouteDurationSeconds),
           method: 'road',
           stale: false,
+          optimiseStatus: 'optimised',
+          timingsUpdated: true,
         }
       }
 
-      // Reorder the day's geocoded activities by rank; keep others in place after.
-      const next = editDaysRef.current.map((d) => {
-        if (d.date !== date) return d
-        const ranked = d.activities.filter((a) => rank.has(a._key)).sort((x, y) => (rank.get(x._key) ?? 0) - (rank.get(y._key) ?? 0))
-        const unranked = d.activities.filter((a) => !rank.has(a._key))
-        return { ...d, activities: [...ranked, ...unranked] }
-      })
+      // Apply the new flexible order, leaving anchors in their fixed positions.
+      const next = editDaysRef.current.map((d) =>
+        d.date === date ? { ...d, activities: applyFlexibleOrder(d.activities, rankedFlexible) } : d,
+      )
       commitDays(next)
       setDayRoutes((prev) => ({ ...prev, [date]: summary }))
+      // PART 11 — recompute timing so the new order's times are correct, never stale.
+      if (!silent) await enrichTiming()
     } catch {
-      // leave as-is on failure
+      // Optimisation could not run — keep the original order and say so (PART 11).
+      setDayRoutes((prev) => ({
+        ...prev,
+        [date]: { stops: part.flexibleKeys.length, distanceKm: prev[date]?.distanceKm ?? 0, durationText: prev[date]?.durationText ?? '—', method: 'haversine', stale: false, optimiseStatus: 'failed', timingsUpdated: false },
+      }))
     } finally {
       if (!silent) setOptimisingDay(null)
     }
+  }
+
+  /** Nearest-neighbour order of flexible keys starting after the bounding start. */
+  function haversineOrderFlexible(
+    points: Array<{ id: string; lat: number; lng: number }>,
+    flexibleKeys: string[],
+  ): string[] {
+    const flex = flexibleKeys.map((k) => points.find((p) => p.id === k)!).filter(Boolean)
+    const start = points.find((p) => p.id === '__start__') ?? flex[0]!
+    const order: typeof flex = []
+    const used = new Set<string>()
+    let cur = start
+    while (order.length < flex.length) {
+      let best: (typeof flex)[number] | null = null
+      let bestD = Infinity
+      for (const p of flex) {
+        if (used.has(p.id)) continue
+        const d = haversine(cur, p)
+        if (d < bestD) { bestD = d; best = p }
+      }
+      if (!best) break
+      order.push(best); used.add(best.id); cur = best
+    }
+    return order.map((p) => p.id)
   }
 
   async function optimiseAllDays() {
@@ -603,9 +668,14 @@ export default function GeneratedItineraryPreview({
       const active = d.activities.filter((a) => !a._removed)
       if (active.length === 0) return d
 
-      // Day start: use AI's first non-hotel startTime, else 09:00.
-      const firstWithTime = active.find((a) => a.category !== 'hotel' && a.startTime)
-      const dayStartMins = parseHHMM(firstWithTime?.startTime) ?? 9 * 60
+      // Day start (stable under re-optimisation): if the day opens with a fixed
+      // anchor that has a time (e.g. an arrival), start there; otherwise 09:00.
+      // Using a stable anchor avoids the start time drifting each re-optimise.
+      const firstActive = active[0]
+      const leadAnchorMins = firstActive && anchorKind(firstActive) !== null
+        ? parseHHMM(firstActive.startTime)
+        : null
+      const dayStartMins = leadAnchorMins ?? 9 * 60
 
       // Compute duration for each activity.
       const withDuration = active.map((a) => ({
@@ -614,31 +684,66 @@ export default function GeneratedItineraryPreview({
         isBase: a.category === 'hotel',
       }))
 
-      // Build leg list for the timing engine (from→ travel mins).
+      // PART 4 — apply group-size / weather buffers per transition. The buffer is
+      // threaded into the timing so planned times are realistic, and surfaced for
+      // display. Rain risk is read from the activity's already-fetched context.
+      const bufferByKey = new Map<string, { mins: number; note: string | null }>()
+      for (let i = 0; i < active.length - 1; i++) {
+        const a = active[i]!
+        const nextAct = active[i + 1]!
+        const leg = legLookup.get(a._key)
+        if (!leg) continue
+        const rain = a._activityContext?.weatherSnapshot?.precipitationProbability
+          ?? nextAct._activityContext?.weatherSnapshot?.precipitationProbability
+        const buf = transitionBuffer({
+          travellerCount,
+          rainProbability: rain,
+          toDeparture: isDepartureAnchor(nextAct),
+        })
+        const inflated = Math.round(leg.travelMins * buf.weatherMultiplier) + buf.groupBufferMins
+        const bufferMins = Math.max(0, inflated - leg.travelMins)
+        bufferByKey.set(a._key, { mins: bufferMins, note: buf.note })
+      }
+
+      // Build leg list for the timing engine (base travel + buffer).
       const legList = active.map((a) => {
         const l = legLookup.get(a._key)
-        return { fromKey: a._key, travelMins: l?.travelMins ?? 0 }
+        const buf = bufferByKey.get(a._key)?.mins ?? 0
+        return { fromKey: a._key, travelMins: (l?.travelMins ?? 0) + buf }
       })
 
       const { timings, summary } = buildDayTiming(withDuration, legList, dayStartMins)
       const timingByKey = new Map(timings.map((t) => [t.key, t]))
 
-      // Patch activities.
+      // Patch activities. Sync the editable startTime/endTime to the COMPUTED
+      // schedule so the visible order can never show a later card with an
+      // earlier time (PART 2).
       const patchedActivities = d.activities.map((a) => {
         const t = timingByKey.get(a._key)
         const leg = legLookup.get(a._key)
+        const buf = bufferByKey.get(a._key)
+        const totalTravel = leg ? leg.travelMins + (buf?.mins ?? 0) : undefined
         return {
           ...a,
           _durationMins: t?.durationMins,
           _plannedStart: t?.plannedStart,
           _plannedEnd: t?.plannedEnd,
-          _travelToNextMins: leg?.travelMins,
+          // Keep the editable fields consistent with the computed timeline.
+          startTime: !a._removed && t?.plannedStart ? t.plannedStart : a.startTime,
+          endTime: !a._removed && t?.plannedEnd ? t.plannedEnd : a.endTime,
+          _travelToNextMins: totalTravel,
           _travelToNextMeters: leg?.distMeters,
-          _travelToNextDistText: leg?.durationText,
+          _travelToNextDistText: totalTravel != null ? fmtMins(totalTravel) : leg?.durationText,
           _travelToNextDistKm: leg?.distText,
           _travelRouteSource: leg?.source,
+          _travelBufferMins: buf?.mins,
+          _travelBufferNote: buf?.note ?? undefined,
         }
       })
+
+      // PART 2 — validate chronology of the computed schedule.
+      const chrono = validateChronology(patchedActivities)
+      const chronoWarning = chrono.ok ? undefined : 'Timing needs review — route order may be inaccurate.'
 
       return {
         ...d,
@@ -649,6 +754,7 @@ export default function GeneratedItineraryPreview({
           activityMins: summary.activityMins,
           travelMins: summary.travelMins,
           paceWarning: summary.paceWarning,
+          chronoWarning,
         },
       }
     })
@@ -698,6 +804,22 @@ export default function GeneratedItineraryPreview({
     const ctxByKey = new Map(data.contexts.map((c) => [c.key, c]))
     const enrichedAt = new Date().toISOString()
 
+    // PART 12A — elevation sanity across the whole itinerary. A low-altitude
+    // destination (e.g. Kolkata) must not carry high-altitude warnings; outlier
+    // elevations are suspect bad geocodes.
+    const validationActs: ValidationActivity[] = []
+    for (const d of base) {
+      for (const a of d.activities) {
+        const c = ctxByKey.get(a._key)
+        validationActs.push({
+          _key: a._key, title: a.title, category: a.category, _removed: a._removed,
+          _lat: a._lat, _lng: a._lng, _elevationFeet: c?.elevationFeet,
+        })
+      }
+    }
+    const elev = checkElevationSanity(validationActs)
+    setLowAltitude(elev.lowAltitude)
+
     const next = base.map((d) => {
       const dayContexts: ActivityContext[] = []
       const activities = d.activities.map((a) => {
@@ -713,12 +835,15 @@ export default function GeneratedItineraryPreview({
           timeZoneContext: data!.timeZone,
           enrichedAt,
         }
-        const warnings = buildContextWarnings(context, isOutdoorCategory(a.category))
+        let warnings = buildContextWarnings(context, isOutdoorCategory(a.category))
+        // Suppress impossible high-altitude warnings for a low-altitude city.
+        if (elev.lowAltitude) warnings = warnings.filter((w) => !/elevation|altitude/i.test(w))
         if (warnings.length > 0) context.contextWarnings = warnings
         if (!a._removed) dayContexts.push(context)
         return { ...a, _activityContext: context }
       })
-      const essentials = buildEssentialSuggestions(dayContexts)
+      let essentials = buildEssentialSuggestions(dayContexts)
+      if (elev.lowAltitude) essentials = essentials.filter((e) => e.category !== 'altitude')
       return {
         ...d,
         activities,
@@ -766,9 +891,11 @@ export default function GeneratedItineraryPreview({
         }
         setEnrichNote(r.done > 0 ? `Auto-verified ${r.done} place${r.done === 1 ? '' : 's'} with Google.` : 'Could not match places automatically — try “Resolve unverified”.')
         // Skip route optimisation if the effect was already cleaned up.
+        // Order: optimise → context (weather/elevation) → timing. Timing runs
+        // last so its buffers can use the fetched rain risk (PART 4).
         if (!cancelled) await optimiseAllDays()
-        if (!cancelled) await enrichTiming()
         if (!cancelled) await enrichContext()
+        if (!cancelled) await enrichTiming()
       } catch {
         // swallow; loading state is cleared in finally regardless
       } finally {
@@ -828,6 +955,12 @@ export default function GeneratedItineraryPreview({
   const hasUnverified = stats.unverified > 0
 
   function handleApplyClick() {
+    // PART 12A — never silently save an itinerary with sanity issues. Require a
+    // second, explicit confirmation when review is needed.
+    if (validation.needsReview && !confirmSave) {
+      setConfirmSave(true)
+      return
+    }
     const cleaned = editDays
       .map((d) => ({ ...d, activities: d.activities.filter((a) => !a._removed) }))
       .filter((d) => d.activities.length > 0)
@@ -839,6 +972,67 @@ export default function GeneratedItineraryPreview({
     [dayRoutes],
   )
   const busy = enriching || optimisingAll || optimisingDay != null || autoRunning
+
+  // ── PART 12A — final sanity validation (boundary / elevation / chronology /
+  // route-status / departure-day). Gates "Create Trip" when issues exist. ─────
+  const validation = useMemo(() => {
+    const activities: ValidationActivity[] = []
+    let chronoIssueCount = 0
+    let departureConflict: string | null = null
+
+    for (const d of editDays) {
+      if (d._timingSummary?.chronoWarning) chronoIssueCount++
+      for (const a of d.activities) {
+        activities.push({
+          _key: a._key, title: a.title, category: a.category, _removed: a._removed,
+          _lat: a._lat, _lng: a._lng, _placeId: a._placeId, _enriched: a._enriched,
+          _elevationFeet: a._activityContext?.elevationFeet,
+        })
+      }
+    }
+
+    // Departure-day conflict (PART 6): on the last day, a flexible stop must not
+    // run up against the departure time without a safe pre-departure buffer.
+    const lastDay = editDays[editDays.length - 1]
+    if (lastDay) {
+      const acts = lastDay.activities.filter((a) => !a._removed)
+      const depIdx = acts.findIndex((a) => anchorKind(a) === 'departure')
+      if (depIdx >= 0) {
+        const dep = acts[depIdx]!
+        const depMins = parseHHMM(dep._plannedStart ?? dep.startTime)
+        if (depMins != null) {
+          // Any non-anchor stop ending within 45 min of departure is too tight.
+          for (const a of acts) {
+            if (anchorKind(a) !== null) continue
+            const end = parseHHMM(a._plannedEnd ?? a.endTime)
+            if (end != null && end > depMins - 45) {
+              departureConflict = 'Departure day is tight — a stop runs too close to your train/flight. Remove a stop or leave earlier.'
+              break
+            }
+          }
+          // A flexible stop scheduled AFTER the departure is always a conflict.
+          for (let i = depIdx + 1; i < acts.length; i++) {
+            if (anchorKind(acts[i]!) === null) {
+              departureConflict = 'A sightseeing stop is scheduled after your departure — reorder or remove it.'
+              break
+            }
+          }
+        }
+      }
+    }
+
+    const routeOptimiseFailed = Object.values(dayRoutes).some((r) => r.optimiseStatus === 'failed')
+
+    const dest: DestinationRef = {
+      city: destinationContext?.city,
+      lat: destinationContext?.lat,
+      lng: destinationContext?.lng,
+    }
+    return validateItinerary({
+      activities, destination: dest, chronologyIssueCount: chronoIssueCount,
+      routeOptimiseFailed, departureConflict,
+    })
+  }, [editDays, dayRoutes, destinationContext])
 
   const c = result.comfortSummary
 
@@ -981,7 +1175,15 @@ export default function GeneratedItineraryPreview({
                       <Route size={11} /> {r.stops} stops · ≈ {r.distanceKm} km{r.durationText !== '—' ? ` · ${r.durationText}` : ''}
                     </span>
                     <span className="text-[10px] text-gray-400">{r.method === 'road' ? 'road' : 'straight-line'}</span>
-                    {!r.stale && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-600"><Check size={9} /> Route optimised</span>}
+                    {!r.stale && r.optimiseStatus === 'optimised' && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-600"><Check size={9} /> Route optimised{r.timingsUpdated ? ' — timings updated' : ''}</span>
+                    )}
+                    {!r.stale && r.optimiseStatus === 'fallback' && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600"><Info size={9} /> Optimised (straight-line) — timings updated</span>
+                    )}
+                    {!r.stale && r.optimiseStatus === 'failed' && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500"><AlertTriangle size={9} /> Route optimisation unavailable — using original order</span>
+                    )}
                     {r.stale && (
                       <button onClick={() => optimiseDay(d.date)} disabled={busy || dayGeocoded < 2}
                         className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50">
@@ -1013,6 +1215,11 @@ export default function GeneratedItineraryPreview({
                       <AlertTriangle size={10} /> {d._timingSummary.paceWarning}
                     </span>
                   )}
+                  {d._timingSummary.chronoWarning && (
+                    <span className="text-red-600 flex items-center gap-0.5">
+                      <AlertTriangle size={10} /> {d._timingSummary.chronoWarning}
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -1028,6 +1235,7 @@ export default function GeneratedItineraryPreview({
                     dayDate={d.date}
                     currency={currency}
                     travellerCount={travellerCount}
+                    suspect={validation.suspectKeys.has(act._key)}
                     nextActivityTitle={(() => {
                       const visibleActs = d.activities.filter((a) => !a._removed)
                       const idx = visibleActs.findIndex((a) => a._key === act._key)
@@ -1061,11 +1269,31 @@ export default function GeneratedItineraryPreview({
       )}
       {applyNote && <p className="mt-2 text-xs text-emerald-600 flex items-center gap-1.5"><Check size={12} /> {applyNote}</p>}
 
+      {/* PART 12A — sanity review banner. Blocks a silent save of an invalid plan. */}
+      {validation.needsReview && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="text-[11px] font-bold text-amber-700 flex items-center gap-1.5 mb-1">
+            <AlertTriangle size={12} /> This itinerary needs review before saving
+          </p>
+          <ul className="space-y-0.5">
+            {validation.issues.slice(0, 5).map((iss, i) => (
+              <li key={i} className="text-[10px] text-amber-700 leading-snug">• {iss.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex flex-wrap gap-2 mt-4">
-        <Button onClick={handleApplyClick} disabled={applying || busy} className="flex-1 min-w-[140px]">
+        <Button onClick={handleApplyClick} disabled={applying || busy}
+          variant={validation.needsReview && confirmSave ? 'secondary' : 'primary'}
+          className="flex-1 min-w-[140px]">
           {applying ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-          {applying ? applyingLabel : applyLabel}
+          {applying
+            ? applyingLabel
+            : validation.needsReview
+              ? (confirmSave ? 'Save anyway' : 'Review & save…')
+              : applyLabel}
         </Button>
         <Button variant="secondary" onClick={onRegenerate} disabled={applying || busy}>
           <Sparkles size={14} /> Regenerate
@@ -1185,13 +1413,14 @@ function SuggestedItemsBlock({
 // ── Activity row ──────────────────────────────────────────────────────────────
 
 function ActivityRow({
-  act, days, dayDate, currency, travellerCount, nextActivityTitle, onPatch, onToggleRemove, onMove,
+  act, days, dayDate, currency, travellerCount, suspect, nextActivityTitle, onPatch, onToggleRemove, onMove,
 }: {
   act: EditableGeneratedActivity
   days: EditableGeneratedDay[]
   dayDate: string
   currency: string
   travellerCount: number
+  suspect?: boolean
   nextActivityTitle?: string
   onPatch: (u: Partial<EditableGeneratedActivity>) => void
   onToggleRemove: () => void
@@ -1217,8 +1446,10 @@ function ActivityRow({
           {/* Badges */}
           <div className="flex items-center flex-wrap gap-1 mt-0.5">
             {act.isBreak && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-500">Break</span>}
-            {v === 'verified' && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600"><ShieldCheck size={9} /> Verified by Google</span>}
-            {v === 'unverified' && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600"><ShieldAlert size={9} /> Unverified</span>}
+            {/* PART 12A — a geographically-wrong match must not claim "Verified by Google". */}
+            {v === 'verified' && !suspect && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600"><ShieldCheck size={9} /> Verified by Google</span>}
+            {suspect && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600"><ShieldAlert size={9} /> Verify match — looks wrong</span>}
+            {v === 'unverified' && !suspect && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600"><ShieldAlert size={9} /> Unverified</span>}
             {act._autoCategory && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-500">Auto-category</span>}
             {act._placeRating != null && <span className="text-[9px] text-gray-400">★ {act._placeRating}{act._placeUserRatings ? ` (${act._placeUserRatings})` : ''}</span>}
           </div>
@@ -1287,7 +1518,7 @@ function ActivityRow({
             </div>
           )}
           {act._travelToNextMins != null && nextActivityTitle && (
-            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-sky-600">
+            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-sky-600 flex-wrap">
               <Navigation2 size={9} className="flex-shrink-0" />
               <span>
                 Next: {act._travelToNextDistText ?? fmtMins(act._travelToNextMins)}
@@ -1295,6 +1526,11 @@ function ActivityRow({
                 {` to ${nextActivityTitle}`}
               </span>
               {act._travelRouteSource === 'estimate' && <span className="text-gray-400">(est.)</span>}
+              {act._travelBufferMins != null && act._travelBufferMins > 0 && (
+                <span className="text-gray-400" title={act._travelBufferNote}>
+                  incl. +{act._travelBufferMins} min buffer
+                </span>
+              )}
             </div>
           )}
           {/* Phase 16F — location context (elevation / weather / AQI) + warnings */}

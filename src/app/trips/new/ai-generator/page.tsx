@@ -22,7 +22,8 @@ import { categoryToActivityType } from '@/lib/maps/categoryMapping'
 import { type IndiaCity, searchCities } from '@/data/indiaCities'
 import { type IndiaRailwayStation, searchRailwayStations } from '@/data/indiaRailwayStations'
 import { type IndiaAirport, searchAirports } from '@/data/indiaAirports'
-import { type IndiaTrainData, searchTrains, validateTrainRoute, fetchTrainDetails, getSuggestedReturnTrain } from '@/data/indiaTrains'
+import { type IndiaTrainData, validateTrainRoute, fetchTrainDetails, getSuggestedReturnTrain } from '@/data/indiaTrains'
+import { searchTrains as trainServiceSearch, type TrainSearchResult } from '@/lib/trains/trainService'
 import type {
   TripType, TripGenerationPreferences, TripInterest, FoodPreference,
   TravelPace, TripGeneratorInput, TripGeneratorResult, GeneratedActivity, Activity,
@@ -1865,14 +1866,25 @@ export default function NewTripAiGeneratorPage() {
                       onCustom={setToStationCustom}
                     />
                   </div>
-                  <SearchableSelect<IndiaTrainData>
+                  <SearchableSelect<TrainSearchResult>
                     label="Train (optional)"
-                    placeholder="Search by number or name — e.g. 12377, Padatik"
-                    search={(q) => searchTrains(q)}
-                    getKey={(t) => t.trainNumber}
-                    renderPrimary={(t) => `${t.trainNumber} · ${t.trainName}`}
-                    renderSecondary={(t) => t.routeDescription}
-                    onSelect={selectTrain}
+                    placeholder="Search by number, name or type — e.g. 12314, Rajdhani"
+                    search={(q) => trainServiceSearch(q, { fromCode: brief.fromStation?.code, toCode: brief.toStation?.code })}
+                    getKey={(r) => r.train.trainNumber}
+                    renderPrimary={(r) => `${r.train.trainNumber} · ${r.train.trainName}`}
+                    renderSecondary={(r) => {
+                      const t = r.train
+                      const timing = t.departureTime && t.arrivalTime
+                        ? ` · Dep ${t.departureTime} → Arr ${t.arrivalTime}${t.arrivalDayOffset ? ` +${t.arrivalDayOffset}` : ''}`
+                        : ''
+                      const flag = r.routeMatch === 'reverse'
+                        ? '  ⚠ Opposite direction'
+                        : r.routeMatch === 'mismatch'
+                          ? '  ⚠ Other match — route mismatch'
+                          : ''
+                      return `${t.routeDescription}${timing}${flag}`
+                    }}
+                    onSelect={(r) => selectTrain(r.train)}
                     selectedPrimary={brief.trainNumber ? `${brief.trainNumber}${brief.trainName ? ` · ${brief.trainName}` : ''}` : null}
                     selectedSecondary={undefined}
                     selectedBadge={brief.trainNumber ? 'Seed' : undefined}
@@ -2157,6 +2169,11 @@ export default function NewTripAiGeneratorPage() {
                 plannedTransport: (brief.transport.totalCost || brief.transport.origin || brief.transport.destination) ? [brief.transport] : undefined,
                 plannedStay: accommodationToPlannedStay(brief.accommodation),
                 stayBaseLabel: brief.accommodation.mode === 'chosen' && brief.accommodation.name?.trim() ? brief.accommodation.name.trim() : undefined,
+              }}
+              destinationContext={{
+                city: brief.destinationStructured?.city ?? brief.destination,
+                lat: brief.destinationStructured?.lat,
+                lng: brief.destinationStructured?.lng,
               }}
               onApply={handleCreateTrip}
               onDiscard={() => { setStage('review-brief'); setResult(null) }}

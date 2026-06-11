@@ -22,6 +22,9 @@ export const INDIA_RAILWAY_STATIONS: IndiaRailwayStation[] = [
   { name: 'Sealdah', code: 'SDAH', city: 'Kolkata', state: 'West Bengal', lat: 22.5675, lng: 88.3700 },
   { name: 'Kolkata', code: 'KOAA', city: 'Kolkata', state: 'West Bengal', lat: 22.5980, lng: 88.3700, aliases: ['Chitpur'] },
   { name: 'New Jalpaiguri', code: 'NJP', city: 'Siliguri', state: 'West Bengal', lat: 26.6855, lng: 88.3920, aliases: ['NJP', 'Siliguri'] },
+  { name: 'Asansol Junction', code: 'ASN', city: 'Asansol', state: 'West Bengal', lat: 23.6850, lng: 86.9760 },
+  { name: 'Durgapur', code: 'DGR', city: 'Durgapur', state: 'West Bengal', lat: 23.5300, lng: 87.2920 },
+  { name: 'Malda Town', code: 'MLDT', city: 'Malda', state: 'West Bengal', lat: 25.0090, lng: 88.1440 },
 
   // ── Delhi ──
   { name: 'New Delhi', code: 'NDLS', city: 'New Delhi', state: 'Delhi', lat: 28.6430, lng: 77.2190 },
@@ -54,6 +57,8 @@ export const INDIA_RAILWAY_STATIONS: IndiaRailwayStation[] = [
   { name: 'Guwahati', code: 'GHY', city: 'Guwahati', state: 'Assam', lat: 26.1820, lng: 91.7460 },
 
   // ── North / Central ──
+  { name: 'Kanpur Central', code: 'CNB', city: 'Kanpur', state: 'Uttar Pradesh', lat: 26.4540, lng: 80.3500 },
+  { name: 'Dhanbad Junction', code: 'DHN', city: 'Dhanbad', state: 'Jharkhand', lat: 23.7950, lng: 86.4300 },
   { name: 'Varanasi Junction', code: 'BSB', city: 'Varanasi', state: 'Uttar Pradesh', lat: 25.3270, lng: 82.9870, aliases: ['Banaras', 'Kashi'] },
   { name: 'Lucknow Charbagh', code: 'LKO', city: 'Lucknow', state: 'Uttar Pradesh', lat: 26.8310, lng: 80.9210, aliases: ['Charbagh'] },
   { name: 'Agra Cantt', code: 'AGC', city: 'Agra', state: 'Uttar Pradesh', lat: 27.1570, lng: 77.9930 },

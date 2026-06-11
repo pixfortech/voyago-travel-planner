@@ -70,6 +70,19 @@ SMART TIMING AFTER ARRIVAL:
 - For overnight trains arriving early morning (e.g. 06:00–09:00): add a "Freshen up / rest"
   break of 45–60 min after check-in before starting sightseeing.
 
+DEPARTURE-DAY PLANNING (when return transport is given) — IMPORTANT:
+- Plan the FINAL day BACKWARDS from the departure time.
+- The last items of the day MUST be: transfer to the departure station/airport, then a
+  "Departure from [Station/Airport]" activity (category: "transport").
+- Apply a pre-departure buffer BEFORE the departure activity:
+    • Train: reach the station 45–60 min before departure.
+    • Domestic flight: reach the airport 2 hours before.
+    • International flight: reach the airport 3 hours before.
+    • Large group / rain / heavy traffic: add extra buffer on top.
+- Do NOT place far-away sightseeing on the departure day if it risks missing the transport.
+  Prefer nearby, short, flexible stops only. If the day is tight, add a warning:
+  "Departure day is tight — remove a stop or leave earlier."
+
 SMART SCHEDULING RULES:
 - NEVER schedule sightseeing in the first 1–2 hours after a long train journey (> 4 hrs),
   unless pace = "packed". Always insert a rest/check-in buffer first.
