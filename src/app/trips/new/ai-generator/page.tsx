@@ -291,6 +291,131 @@ function accommodationToPlannedStay(acc: AccommodationDraft): PlannedStay | unde
   }
 }
 
+// ── Parts 5 & 6 — deterministic transport anchor injection ─────────────────
+
+const _ARR_RE = /\b(arrival|arrive|arriving|reach(?:ing)?|land(?:ing)?|deboard)\b/i
+const _DEP_RE = /\b(departure|depart(?:ing)?|board(?:ing)?|catch(?: the)?|onward train|onward flight|leave for (?:the )?(?:station|airport))\b/i
+const _XFER_RE = /\b(transfer|drive to|cab to|taxi to|pick-?up|drop-?off|en route to|head to.*station|head to.*airport)\b/i
+
+/**
+ * Deterministically inject arrival/departure anchors based on the user's
+ * transport form. Overrides any AI-generated guess for timing.
+ *
+ * PART 6 — Day 1: prepend/fix arrival anchor at `trainArrivalTime`.
+ * PART 5 — Last day: append/fix departure chain at `returnTrainDepartureTime`.
+ */
+function injectTransportAnchors(
+  result: TripGeneratorResult,
+  ctx: TripTransportContext,
+  destinationLabel: string,
+): TripGeneratorResult {
+  if (!result.dayPlans.length) return result
+  const days = result.dayPlans.map((d) => ({ ...d, activities: [...d.activities] }))
+
+  // PART 6 — first-day arrival anchor (train mode only; flight times not tracked)
+  const arrivalTime = ctx.mode === 'train' ? (ctx.trainArrivalTime ?? undefined) : undefined
+  if (arrivalTime) {
+    const day = days[0]!
+    const stationLabel = ctx.toStation
+      ? `${ctx.toStation.name || ctx.toStation.city}${ctx.toStation.code ? ` (${ctx.toStation.code})` : ''}`
+      : destinationLabel
+
+    const existingIdx = day.activities.findIndex((a) =>
+      _ARR_RE.test(a.title) ||
+      (a.category === 'transport' && /station|railway/i.test(a.title) && _ARR_RE.test(a.title))
+    )
+    if (existingIdx >= 0) {
+      day.activities[existingIdx] = { ...day.activities[existingIdx]!, startTime: arrivalTime }
+    } else {
+      const anchor: GeneratedActivity = {
+        title: `Arrive at ${stationLabel}`,
+        category: 'transport',
+        estimatedCost: 0,
+        bookingStatus: 'planned',
+        startTime: arrivalTime,
+        routeNotes: ctx.trainNumber
+          ? `Train ${ctx.trainNumber}${ctx.trainName ? ` — ${ctx.trainName}` : ''}`
+          : undefined,
+      }
+      day.activities.unshift(anchor)
+    }
+  }
+
+  // PART 5 — last-day departure chain (round-trip train only)
+  const returnDepTime =
+    ctx.travelType === 'round_trip' && ctx.mode === 'train'
+      ? (ctx.returnTrainDepartureTime ?? undefined)
+      : undefined
+
+  if (returnDepTime) {
+    const day = days[days.length - 1]!
+    const stationLabel = ctx.returnFromStation
+      ? `${ctx.returnFromStation.name || ctx.returnFromStation.city}${ctx.returnFromStation.code ? ` (${ctx.returnFromStation.code})` : ''}`
+      : ctx.toStation
+        ? `${ctx.toStation.name || ctx.toStation.city}${ctx.toStation.code ? ` (${ctx.toStation.code})` : ''}`
+        : destinationLabel
+
+    // Compute "leave by" = departure − 90 min
+    const dParts = returnDepTime.split(':')
+    const dH = parseInt(dParts[0] ?? '0')
+    const dM = parseInt(dParts[1] ?? '0')
+    const depMins = dH * 60 + dM
+    const leaveMins = depMins - 90
+    const leaveTime = leaveMins > 0
+      ? `${Math.floor(leaveMins / 60).toString().padStart(2, '0')}:${(leaveMins % 60).toString().padStart(2, '0')}`
+      : null
+
+    // Fix or append the departure anchor
+    const existingDepIdx = day.activities.findIndex((a) =>
+      _DEP_RE.test(a.title) ||
+      (a.category === 'transport' && /station|railway/i.test(a.title) && _DEP_RE.test(a.title))
+    )
+    if (existingDepIdx >= 0) {
+      day.activities[existingDepIdx] = { ...day.activities[existingDepIdx]!, startTime: returnDepTime }
+    } else {
+      const depAnchor: GeneratedActivity = {
+        title: `Depart from ${stationLabel}`,
+        category: 'transport',
+        estimatedCost: 0,
+        bookingStatus: 'planned',
+        startTime: returnDepTime,
+        routeNotes: ctx.returnTrainNumber
+          ? `Train ${ctx.returnTrainNumber}${ctx.returnTrainName ? ` — ${ctx.returnTrainName}` : ''}`
+          : undefined,
+      }
+      day.activities.push(depAnchor)
+    }
+
+    // Add "Head to station" transfer if none exists
+    if (leaveTime) {
+      const existingXferIdx = day.activities.findIndex((a) =>
+        _XFER_RE.test(a.title) || /head to.*station|cab to.*station/i.test(a.title)
+      )
+      if (existingXferIdx < 0) {
+        const curDepIdx = day.activities.findIndex((a) =>
+          _DEP_RE.test(a.title) || /depart from/i.test(a.title)
+        )
+        const xferAct: GeneratedActivity = {
+          title: `Head to ${stationLabel}`,
+          category: 'transport',
+          estimatedCost: 150,
+          bookingStatus: 'planned',
+          startTime: leaveTime,
+          timeToSpend: '30–45 min',
+          routeNotes: `Leave by ${leaveTime} to reach the station before departure at ${returnDepTime}`,
+        }
+        if (curDepIdx >= 0) {
+          day.activities.splice(curDepIdx, 0, xferAct)
+        } else {
+          day.activities.push(xferAct)
+        }
+      }
+    }
+  }
+
+  return { ...result, dayPlans: days }
+}
+
 // ── Small reusable chip ────────────────────────────────────────────────────
 
 function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
@@ -1004,7 +1129,11 @@ export default function NewTripAiGeneratorPage() {
         }
       }
 
-      setResult(enrichedResult)
+      // Parts 5 & 6 — deterministically fix arrival/departure times from form.
+      const finalResult = transportContext
+        ? injectTransportAnchors(enrichedResult, transportContext, brief.destination)
+        : enrichedResult
+      setResult(finalResult)
       setIsMock(data.isMock)
       setStage('preview')
     } catch {
