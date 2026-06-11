@@ -2293,6 +2293,7 @@ export default function NewTripAiGeneratorPage() {
               mapsAvailable={mapsStatus.available}
               applyLabel="Create Trip"
               applyingLabel="Creating trip…"
+              transportMode={brief.transport.mode}
               autoEnrich
               budgetContext={{
                 budget: brief.budget,

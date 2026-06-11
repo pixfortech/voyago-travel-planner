@@ -112,3 +112,49 @@ export function repairMealCategory(mealType: string, timeHHMM?: string): string 
   const issue = validateMealTime(mealType, timeHHMM)
   return issue ? issue.suggestedMealType : mealType
 }
+
+// ── Post-departure meal conversion (terminal-anchor hotfix PART 3) ────────────
+
+export interface ConvertedMeal {
+  /** New, travel-appropriate activity title. */
+  title: string
+  /** Short explanatory note for the card. */
+  note: string
+}
+
+/**
+ * A meal cannot be eaten at a city restaurant once the traveller has boarded.
+ * Convert it to a realistic travel-context meal — packed food, station food,
+ * or an onboard meal — chosen by the scheduled time and transport mode.
+ */
+export function convertMealForTravel(
+  timeHHMM: string | undefined,
+  mode: 'train' | 'flight' | 'bus' | 'car' | 'other' | undefined,
+): ConvertedMeal {
+  const onboardWord =
+    mode === 'flight' ? 'onboard the flight'
+    : mode === 'bus' ? 'on the bus'
+    : mode === 'car' ? 'en route'
+    : 'onboard the train'
+
+  const mins = timeHHMM ? toMins(timeHHMM) : null
+  // Identify the meal by time so the wording matches (lunch / dinner / snack).
+  let mealWord = 'meal'
+  if (mins != null) {
+    if (mins >= h(7) && mins < h(11)) mealWord = 'breakfast'
+    else if (mins >= h(11) && mins < h(16)) mealWord = 'lunch'
+    else if (mins >= h(16) && mins < h(19)) mealWord = 'snack'
+    else mealWord = 'dinner'
+  }
+
+  if (mode === 'flight') {
+    return {
+      title: `Pre-flight ${mealWord} or ${onboardWord}`,
+      note: `Eat before security or have the ${mealWord} ${onboardWord} — no city restaurant stop after departure.`,
+    }
+  }
+  return {
+    title: `Packed ${mealWord} / ${mealWord} ${onboardWord}`,
+    note: `Grab station food before boarding or carry a packed ${mealWord} — no city restaurant stop after departure.`,
+  }
+}

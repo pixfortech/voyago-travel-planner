@@ -40,13 +40,13 @@ import type { PlaceContextResponse } from '@/app/api/maps/place-context/route'
 import { buildContextWarnings, buildEssentialSuggestions, isOutdoorCategory } from '@/lib/context/essentials'
 import {
   partitionForOptimise, applyFlexibleOrder, transitionBuffer, isDepartureAnchor,
-  validateChronology, anchorKind,
+  validateChronology, anchorKind, terminalDepartureIndex, isTravelContextAfterDeparture,
 } from '@/lib/ai/routePlanning'
 import {
   checkElevationSanity, validateItinerary,
   type ValidationActivity, type DestinationRef,
 } from '@/lib/ai/itineraryValidation'
-import { validateMealTime, repairMealCategory } from '@/lib/ai/mealTimeSanity'
+import { validateMealTime, repairMealCategory, convertMealForTravel } from '@/lib/ai/mealTimeSanity'
 
 export interface EditableGeneratedActivity extends GeneratedActivity {
   _key: string
@@ -84,6 +84,13 @@ export interface EditableGeneratedActivity extends GeneratedActivity {
   }
   // Hotfix Part 7 — meal-time mismatch warning
   _mealTimeIssue?: string
+  // Terminal-anchor hotfix — departure / onboard handling
+  /** This is the terminal departure (board train/flight); nothing city-side may follow. */
+  _terminalDeparture?: boolean
+  /** A meal converted to packed/station/onboard food because it sits after departure. */
+  _onboardMeal?: boolean
+  /** A city activity removed because it was scheduled after the terminal departure. */
+  _postDepartureRemoved?: boolean
 }
 export interface EditableGeneratedDay {
   date: string
@@ -128,6 +135,8 @@ interface PreviewProps {
   budgetContext?: PreviewBudgetContext
   /** Phase 16G PART 12A — destination centre for boundary/elevation sanity checks. */
   destinationContext?: { city?: string; lat?: number; lng?: number }
+  /** Transport mode — drives post-departure meal conversion wording (train/flight/…). */
+  transportMode?: 'train' | 'flight' | 'bus' | 'car' | 'other'
   onApply: (days: EditableGeneratedDay[]) => void
   onDiscard: () => void
   onRegenerate: () => void
@@ -194,6 +203,71 @@ function extractLocality(address?: string): EditableGeneratedActivity['_location
   // Don't show locality when it repeats the city.
   const area = locality && locality !== city ? locality : undefined
   return { city, locality: area }
+}
+
+// ── Terminal departure enforcement (terminal-anchor hotfix PARTS 1/3) ────────
+
+/**
+ * Enforce that a departure is a TERMINAL event: nothing city-side may follow it.
+ * For activities after the terminal departure:
+ *   • travel-context (onboard journey/meal, station wait, next-city arrival) — kept
+ *   • food — converted to packed/station/onboard food (city restaurant stripped)
+ *   • any other city stop (sightseeing/market/temple/…) — removed
+ * Flags are cleared when no departure exists so re-runs stay idempotent.
+ */
+function enforceTerminalDeparture(
+  activities: EditableGeneratedActivity[],
+  mode: 'train' | 'flight' | 'bus' | 'car' | 'other' | undefined,
+): EditableGeneratedActivity[] {
+  const clearFlags = (a: EditableGeneratedActivity): EditableGeneratedActivity =>
+    a._terminalDeparture || a._onboardMeal || a._postDepartureRemoved
+      ? { ...a, _terminalDeparture: false, _onboardMeal: false, _postDepartureRemoved: false }
+      : a
+
+  const visible = activities.filter((a) => !a._removed)
+  const termIdx = terminalDepartureIndex(visible)
+  if (termIdx < 0) return activities.map(clearFlags)
+
+  const terminalKey = visible[termIdx]!._key
+  const afterKeys = new Set(visible.slice(termIdx + 1).map((a) => a._key))
+
+  return activities.map((a) => {
+    if (a._key === terminalKey) {
+      return { ...a, _terminalDeparture: true, _onboardMeal: false, _postDepartureRemoved: false }
+    }
+    if (!afterKeys.has(a._key)) return clearFlags(a)
+
+    // After the terminal departure:
+    if (isTravelContextAfterDeparture(a)) {
+      return { ...a, _terminalDeparture: false, _postDepartureRemoved: false }
+    }
+    if (a.category === 'food') {
+      // Convert a city meal into a realistic travel-context meal.
+      const conv = convertMealForTravel(a._plannedStart ?? a.startTime, mode)
+      return {
+        ...a,
+        title: conv.title,
+        whyRecommended: conv.note,
+        _onboardMeal: true,
+        _terminalDeparture: false,
+        _postDepartureRemoved: false,
+        _removed: false,
+        _mealTimeIssue: undefined,
+        // Strip the city-restaurant match — you can't dine there after leaving.
+        restaurantSuggestion: undefined,
+        suggestedItems: undefined,
+        menuSourceUrl: undefined,
+        _placeId: undefined,
+        _placeAddress: undefined,
+        _locationContext: undefined,
+        _travelToNextMins: undefined,
+        _travelToNextDistText: undefined,
+        _travelToNextDistKm: undefined,
+      }
+    }
+    // Any other city activity after departure is impossible — remove it.
+    return { ...a, _removed: true, _postDepartureRemoved: true, _terminalDeparture: false, _onboardMeal: false }
+  })
 }
 
 /** Verification state for a single activity (drives badges + apply gating). */
@@ -303,7 +377,7 @@ function EssentialsBlock({ essentials }: { essentials?: EssentialSuggestion[] })
 export default function GeneratedItineraryPreview({
   result, currency, travellerCount, isMock, applying, applyNote, mapsAvailable,
   applyLabel = 'Apply to trip', applyingLabel = 'Applying…',
-  autoEnrich = false, budgetContext, destinationContext,
+  autoEnrich = false, budgetContext, destinationContext, transportMode,
   onApply, onDiscard, onRegenerate,
 }: PreviewProps) {
   const [editDays, setEditDays] = useState<EditableGeneratedDay[]>([])
@@ -803,9 +877,14 @@ export default function GeneratedItineraryPreview({
         }
       })
 
+      // Terminal-anchor hotfix PARTS 1/3 — nothing city-side may follow the
+      // departure. City stops after it are removed; meals are converted to
+      // packed/station/onboard food.
+      const terminalActivities = enforceTerminalDeparture(repairedActivities, transportMode)
+
       return {
         ...d,
-        activities: repairedActivities,
+        activities: terminalActivities,
         _timingSummary: {
           dayStart: summary.dayStart,
           dayEnd: summary.dayEnd,
@@ -1089,6 +1168,31 @@ export default function GeneratedItineraryPreview({
       }
     }
 
+    // Terminal-anchor hotfix PART 9 — count any city stop still scheduled after a
+    // terminal departure (onboard/arrival/wait items are allowed), and any
+    // lunch/dinner suggestion that is missing a main dish (incomplete meal set).
+    let postDepartureActivityCount = 0
+    let incompleteMealCount = 0
+    for (const d of editDays) {
+      const visible = d.activities.filter((a) => !a._removed)
+      const termIdx = terminalDepartureIndex(visible)
+      if (termIdx >= 0) {
+        for (let i = termIdx + 1; i < visible.length; i++) {
+          const a = visible[i]!
+          if (a._onboardMeal || isTravelContextAfterDeparture(a)) continue
+          postDepartureActivityCount++
+        }
+      }
+      for (const a of visible) {
+        if (a._onboardMeal) continue
+        if (a.category !== 'food') continue
+        if (a.mealType !== 'lunch' && a.mealType !== 'dinner') continue
+        if (a.suggestedItems && a.suggestedItems.length > 0 && !a.suggestedItems.some((it) => it.role === 'main')) {
+          incompleteMealCount++
+        }
+      }
+    }
+
     const dest: DestinationRef = {
       city: destinationContext?.city,
       lat: destinationContext?.lat,
@@ -1097,6 +1201,7 @@ export default function GeneratedItineraryPreview({
     return validateItinerary({
       activities, destination: dest, chronologyIssueCount: chronoIssueCount,
       routeOptimiseFailed, departureConflict, mealTimeMismatchCount,
+      postDepartureActivityCount, incompleteMealCount,
     })
   }, [editDays, dayRoutes, destinationContext])
 
@@ -1307,6 +1412,13 @@ export default function GeneratedItineraryPreview({
                       const idx = visibleActs.findIndex((a) => a._key === act._key)
                       return visibleActs[idx + 1]?.title
                     })()}
+                    nextIsTravelContext={(() => {
+                      const visibleActs = d.activities.filter((a) => !a._removed)
+                      const idx = visibleActs.findIndex((a) => a._key === act._key)
+                      const nxt = visibleActs[idx + 1]
+                      return !!nxt && (nxt._onboardMeal || isTravelContextAfterDeparture(nxt))
+                    })()}
+                    transportMode={transportMode}
                     onPatch={(u) => patch(d.date, act._key, u)}
                     onToggleRemove={() => toggleRemove(d.date, act._key)}
                     onMove={(toDate) => moveToDay(d.date, act._key, toDate)}
@@ -1479,7 +1591,8 @@ function SuggestedItemsBlock({
 // ── Activity row ──────────────────────────────────────────────────────────────
 
 function ActivityRow({
-  act, days, dayDate, currency, travellerCount, suspect, nextActivityTitle, onPatch, onToggleRemove, onMove,
+  act, days, dayDate, currency, travellerCount, suspect, nextActivityTitle,
+  nextIsTravelContext, transportMode, onPatch, onToggleRemove, onMove,
 }: {
   act: EditableGeneratedActivity
   days: EditableGeneratedDay[]
@@ -1488,12 +1601,25 @@ function ActivityRow({
   travellerCount: number
   suspect?: boolean
   nextActivityTitle?: string
+  /** True when the next visible activity is onboard/arrival/wait (travel context). */
+  nextIsTravelContext?: boolean
+  /** Transport mode — labels the terminal departure card ("Depart by train"). */
+  transportMode?: 'train' | 'flight' | 'bus' | 'car' | 'other'
   onPatch: (u: Partial<EditableGeneratedActivity>) => void
   onToggleRemove: () => void
   onMove: (toDate: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const v = verifyState(act)
+
+  // Terminal-anchor hotfix PART 5 — a terminal departure is a hard end event.
+  const isTerminal = !!act._terminalDeparture
+  const departWord =
+    transportMode === 'flight' ? 'flight'
+    : transportMode === 'bus' ? 'bus'
+    : transportMode === 'car' ? 'car'
+    : 'train'
+  const departTime = act._plannedStart ?? act.startTime
 
   // Part 8: compact locality label shown in collapsed view.
   const localityLabel = act._locationContext?.locality
@@ -1534,6 +1660,9 @@ function ActivityRow({
             {act._placeRating != null && <span className="text-[9px] text-gray-400">★ {act._placeRating}{act._placeUserRatings ? ` (${act._placeUserRatings})` : ''}</span>}
             {/* Part 7: meal-time mismatch warning badge */}
             {act._mealTimeIssue && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600" title={act._mealTimeIssue}><AlertTriangle size={8} /> Meal time adjusted</span>}
+            {/* Terminal-anchor hotfix: onboard/packed meal + terminal departure badges */}
+            {act._onboardMeal && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">Onboard / packed</span>}
+            {act._terminalDeparture && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700">Departure — trip ends here</span>}
           </div>
           {/* Phase 16D — restaurant suggestion for food breaks */}
           {act.restaurantSuggestion && act.category === 'food' && (
@@ -1590,30 +1719,51 @@ function ActivityRow({
               )}
             </>
           )}
-          {/* Phase 16E — planned timing (collapsed) */}
-          {act._plannedStart && act._durationMins != null && act._durationMins > 0 && (
-            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400">
-              <Clock size={9} className="flex-shrink-0" />
-              <span>{act._plannedStart} – {act._plannedEnd}</span>
-              <span className="text-gray-300">·</span>
-              <span>{fmtMins(act._durationMins)} stay</span>
-            </div>
-          )}
-          {act._travelToNextMins != null && nextActivityTitle && (
-            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-sky-600 flex-wrap">
+          {/* PART 5 — terminal departure card: boarding/buffer + departure time,
+              never a "X min stay" or a city "Next" route. */}
+          {isTerminal ? (
+            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-indigo-600 flex-wrap font-semibold">
               <Navigation2 size={9} className="flex-shrink-0" />
-              <span>
-                Next: {act._travelToNextDistText ?? fmtMins(act._travelToNextMins)}
-                {act._travelToNextDistKm ? ` / ${act._travelToNextDistKm}` : ''}
-                {` to ${nextActivityTitle}`}
-              </span>
-              {act._travelRouteSource === 'estimate' && <span className="text-gray-400">(est.)</span>}
-              {act._travelBufferMins != null && act._travelBufferMins > 0 && (
-                <span className="text-gray-400" title={act._travelBufferNote}>
-                  incl. +{act._travelBufferMins} min buffer
-                </span>
+              <span>Station buffer / boarding</span>
+              {departTime && (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span>Depart by {departWord}{departTime ? ` at ${departTime}` : ''}</span>
+                </>
+              )}
+              {/* Only an onboard/arrival item may follow a departure. */}
+              {nextIsTravelContext && nextActivityTitle && (
+                <span className="text-indigo-400 font-normal">→ {nextActivityTitle}</span>
               )}
             </div>
+          ) : (
+            <>
+              {/* Phase 16E — planned timing (collapsed) */}
+              {act._plannedStart && act._durationMins != null && act._durationMins > 0 && (
+                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400">
+                  <Clock size={9} className="flex-shrink-0" />
+                  <span>{act._plannedStart} – {act._plannedEnd}</span>
+                  <span className="text-gray-300">·</span>
+                  <span>{fmtMins(act._durationMins)} stay</span>
+                </div>
+              )}
+              {act._travelToNextMins != null && nextActivityTitle && (
+                <div className="flex items-center gap-1 mt-0.5 text-[10px] text-sky-600 flex-wrap">
+                  <Navigation2 size={9} className="flex-shrink-0" />
+                  <span>
+                    Next: {act._travelToNextDistText ?? fmtMins(act._travelToNextMins)}
+                    {act._travelToNextDistKm ? ` / ${act._travelToNextDistKm}` : ''}
+                    {` to ${nextActivityTitle}`}
+                  </span>
+                  {act._travelRouteSource === 'estimate' && <span className="text-gray-400">(est.)</span>}
+                  {act._travelBufferMins != null && act._travelBufferMins > 0 && (
+                    <span className="text-gray-400" title={act._travelBufferNote}>
+                      incl. +{act._travelBufferMins} min buffer
+                    </span>
+                  )}
+                </div>
+              )}
+            </>
           )}
           {/* Phase 16F — location context shown in collapsed view */}
           <ActivityContextLines ctx={act._activityContext} />

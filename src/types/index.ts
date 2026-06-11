@@ -1500,6 +1500,11 @@ export type SuggestedFoodItemBasis =
 export interface SuggestedFoodItem {
   name: string
   category: 'food' | 'drink' | 'dessert' | 'snack'
+  /**
+   * Composition role within a meal set. Used to validate that a lunch/dinner
+   * suggestion is a complete meal (has a `main`) and not only a bread/side.
+   */
+  role?: 'main' | 'bread_rice' | 'side' | 'drink' | 'dessert' | 'snack'
   vegType?: 'veg' | 'non_veg' | 'vegan' | 'unknown'
   estimatedPriceMin: number
   estimatedPriceMax: number

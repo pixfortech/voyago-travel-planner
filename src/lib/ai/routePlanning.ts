@@ -83,6 +83,46 @@ export function isDepartureAnchor(a: RoutePlanActivity): boolean {
   return k === 'departure'
 }
 
+// ── Terminal departure logic (terminal-anchor hotfix PART 1) ─────────────────
+
+const ONBOARD_RE = /\b(onboard|on[\s-]?board|in[\s-]?(?:train|flight)|aboard|journey|enroute|en[\s-]?route\s+meal|train\s+meal|onward\s+(?:train|flight|journey))\b/i
+const WAIT_RE = /\b(boarding|station\s+buffer|airport\s+buffer|wait(?:ing)?\s+(?:at|for)|platform|lounge)\b/i
+
+/**
+ * A departure anchor (board train / flight / leave for station) is TERMINAL:
+ * nothing in the city itinerary may follow it. Only travel-context items
+ * (onboard journey/meal, station wait, arrival at the next city) are allowed
+ * after it.
+ */
+export function isTerminalDeparture(a: RoutePlanActivity): boolean {
+  return anchorKind(a) === 'departure'
+}
+
+/**
+ * True when an activity is legitimately allowed AFTER a terminal departure:
+ * onboard journey/meal, station/airport wait, or arrival at the next city.
+ * Everything else (sightseeing, city restaurants, markets, temples) is not.
+ */
+export function isTravelContextAfterDeparture(a: RoutePlanActivity): boolean {
+  const k = anchorKind(a)
+  if (k === 'arrival' || k === 'departure') return true
+  const t = (a.title ?? '').toLowerCase()
+  return ONBOARD_RE.test(t) || WAIT_RE.test(t)
+}
+
+/**
+ * Index of the LAST terminal departure anchor in a visible (non-removed)
+ * activity list, or -1 when there is none. Anything after this index that is
+ * not travel-context is an impossible post-departure activity.
+ */
+export function terminalDepartureIndex(activities: RoutePlanActivity[]): number {
+  let idx = -1
+  activities.forEach((a, i) => {
+    if (!a._removed && isTerminalDeparture(a)) idx = i
+  })
+  return idx
+}
+
 export interface OptimisePartition {
   /** Keys of flexible, geocoded, non-removed stops to reorder. */
   flexibleKeys: string[]

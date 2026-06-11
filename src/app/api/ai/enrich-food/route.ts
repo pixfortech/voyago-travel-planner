@@ -494,6 +494,132 @@ function localeTemplatesFor(
   return out
 }
 
+// ── Meal composition (smart-meal hotfix PARTS 6/7/8) ─────────────────────────
+
+type ItemRole = NonNullable<SuggestedFoodItem['role']>
+
+/**
+ * Infer a composition role from a dish name + its coarse category. Pure
+ * bread/rice and pure sides are classified as accompaniments; everything else
+ * in the 'food' category is treated as a `main`. This is what lets us detect
+ * an incomplete meal like "Garlic Naan" on its own.
+ */
+function inferDishRole(name: string, category: SuggestedFoodItem['category']): ItemRole {
+  if (category === 'drink') return 'drink'
+  if (category === 'dessert') return 'dessert'
+  if (category === 'snack') return 'snack'
+  const n = name.trim().toLowerCase()
+  // Pure bread/rice — only when the name is JUST a bread/rice word (optionally
+  // prefixed). "Aloo paratha", "rajma chawal", "fish curry rice" stay mains.
+  if (/^(garlic |butter |plain |tandoori |laccha |steamed |jeera )?(naan|roti|kulcha|rumali roti|paratha|rice|pulao)$/.test(n)) return 'bread_rice'
+  if (/^(bread|roti|rice)(\s*\/\s*(roti|rice|naan|bread))*$/.test(n)) return 'bread_rice'
+  if (/^(raita|papad|salad|green salad|pickle|curd|fries|french fries)$/.test(n)) return 'side'
+  return 'main'
+}
+
+/** True for meals that must be a complete set (have a main): lunch/dinner/generic. */
+function needsMainDish(mealType: string | undefined): boolean {
+  return mealType === 'lunch' || mealType === 'dinner' || mealType == null
+}
+
+/** Restaurant looks like a Mughlai / biryani / kebab house (Arsalan-style). */
+function isMughlaiBiryaniPlace(name: string): boolean {
+  return /\b(biryani|mughlai|kebab|arsalan|aminia|shiraz|royal\s+indian|nawab|tandoor)\b/i.test(name)
+}
+
+function nonVegMainFor(region: CuisineRegion, mughlai: boolean): { name: string; vegType: 'non_veg' } {
+  if (mughlai) return { name: 'Chicken / Mutton Biryani', vegType: 'non_veg' }
+  switch (region) {
+    case 'bengali': return { name: 'Kosha Mangsho / Macher Jhol with rice', vegType: 'non_veg' }
+    case 'ne_india': return { name: 'Chicken thukpa / non-veg thali', vegType: 'non_veg' }
+    case 'south_indian': return { name: 'Chicken / fish curry with rice', vegType: 'non_veg' }
+    case 'rajasthani': return { name: 'Laal Maas with rice', vegType: 'non_veg' }
+    case 'goan': return { name: 'Fish curry rice / prawn curry', vegType: 'non_veg' }
+    case 'mumbai': return { name: 'Chicken curry / kebab', vegType: 'non_veg' }
+    default: return { name: 'Butter Chicken / chicken curry', vegType: 'non_veg' }
+  }
+}
+
+function vegMainFor(region: CuisineRegion, mughlai: boolean, vegan: boolean): { name: string; vegType: 'veg' | 'vegan' } {
+  const vt: 'veg' | 'vegan' = vegan ? 'vegan' : 'veg'
+  if (mughlai) return { name: vegan ? 'Veg biryani with dal' : 'Paneer dish / Veg Biryani', vegType: vt }
+  switch (region) {
+    case 'bengali': return { name: vegan ? 'Veg curry with rice' : 'Paneer / veg curry with rice', vegType: vt }
+    case 'ne_india': return { name: 'Veg thali / veg momo', vegType: vt }
+    case 'south_indian': return { name: 'Veg meals / dosa', vegType: vt }
+    case 'rajasthani': return { name: 'Dal Baati / veg thali', vegType: vt }
+    case 'goan': return { name: 'Veg Goan thali', vegType: vt }
+    case 'mumbai': return { name: 'Veg thali / pav bhaji', vegType: vt }
+    default: return { name: vegan ? 'Vegan main course with rice' : 'Paneer butter masala / dal with rice', vegType: vt }
+  }
+}
+
+/**
+ * Pick the main dish(es) to complete a meal. Veg+non-veg users get BOTH a veg
+ * and a non-veg main (separate sets, never random isolated items).
+ */
+function chooseMains(
+  region: CuisineRegion,
+  restaurantName: string,
+  wantVeg: boolean,
+  wantNonVeg: boolean,
+  vegan: boolean,
+  dietaryProfile: DietaryProfile,
+): Array<{ name: string; vegType: NonNullable<SuggestedFoodItem['vegType']> }> {
+  const strictVeg = (wantVeg && !wantNonVeg) || dietaryProfile === 'pure_veg'
+  const mughlai = isMughlaiBiryaniPlace(restaurantName)
+  if (strictVeg) return [vegMainFor(region, mughlai, vegan)]
+  if (wantNonVeg && !wantVeg) return [nonVegMainFor(region, mughlai)]
+  if (wantVeg && wantNonVeg) return [vegMainFor(region, mughlai, vegan), nonVegMainFor(region, mughlai)]
+  // No explicit preference — follow the restaurant's profile.
+  if (dietaryProfile === 'non_veg_friendly') return [nonVegMainFor(region, mughlai)]
+  return [vegMainFor(region, mughlai, vegan)]
+}
+
+/**
+ * Guarantee a lunch/dinner suggestion is a complete meal. If the built items
+ * contain no `main` (e.g. only "Garlic Naan"), prepend a compatible main dish
+ * derived from cuisine region + restaurant type + dietary preference.
+ */
+function ensureCompleteMeal(
+  items: SuggestedFoodItem[],
+  mealType: string | undefined,
+  region: CuisineRegion,
+  restaurantName: string,
+  foodPreferences: FoodPreference[],
+  dietaryProfile: DietaryProfile,
+  spend: SpendRange,
+  currency: string,
+): SuggestedFoodItem[] {
+  if (!needsMainDish(mealType)) return items
+  if (items.some((it) => it.role === 'main')) return items
+
+  const wantVeg = foodPreferences.includes('vegetarian') || foodPreferences.includes('jain') || foodPreferences.includes('vegan')
+  const wantNonVeg = foodPreferences.includes('non_vegetarian')
+  const vegan = foodPreferences.includes('vegan') && !foodPreferences.includes('vegetarian')
+
+  const mains = chooseMains(region, restaurantName, wantVeg, wantNonVeg, vegan, dietaryProfile)
+  const share = 0.5
+  const mainItems: SuggestedFoodItem[] = mains.map((m) => {
+    const min = Math.max(1, Math.round(spend.perPersonMin * share))
+    const max = Math.max(min + 1, Math.round(spend.perPersonMax * share))
+    return {
+      name: m.name,
+      category: 'food',
+      role: 'main',
+      vegType: m.vegType,
+      estimatedPriceMin: min,
+      estimatedPriceMax: max,
+      currency,
+      confidence: spend.confidence,
+      basis: 'restaurant_type_city_heuristic',
+      sourceNote: 'Added to complete the meal — a main paired with the suggested side(s).',
+    }
+  })
+  // Main(s) first so the set reads as a complete meal; cap total items.
+  return [...mainItems, ...items].slice(0, 5)
+}
+
 const SOURCE_NOTE: Record<SuggestedFoodItemBasis, string> = {
   official_menu_or_website: 'Estimated from official menu/website where available.',
   google_review_item_mentions: 'Item mentioned in Google reviews; price is approximate.',
@@ -519,6 +645,7 @@ function buildSuggestedItems(
   cuisineRegion: CuisineRegion,
   dietaryProfile: DietaryProfile,
   reviewMentions: ReviewItemMention[],
+  restaurantName: string,
 ): SuggestedFoodItem[] {
   const wantVeg = foodPreferences.includes('vegetarian') || foodPreferences.includes('jain') || foodPreferences.includes('vegan')
   const wantNonVeg = foodPreferences.includes('non_vegetarian')
@@ -529,9 +656,11 @@ function buildSuggestedItems(
 
   const itemBasis = spendBasisToItemBasis(spend.basis)
 
+  let items: SuggestedFoodItem[]
+
   // ── Build from review mentions when available ──
   if (reviewMentions.length >= 2) {
-    return reviewMentions
+    items = reviewMentions
       .filter((m) => {
         if (strictVeg && m.vegType === 'non_veg') return false
         if (!wantNonVeg && !wantVeg && m.vegType === 'non_veg' && dietaryProfile === 'pure_veg') return false
@@ -545,6 +674,7 @@ function buildSuggestedItems(
         return {
           name: m.name,
           category: m.category,
+          role: inferDishRole(m.name, m.category),
           vegType: m.vegType,
           estimatedPriceMin: min,
           estimatedPriceMax: max,
@@ -555,32 +685,36 @@ function buildSuggestedItems(
           popularityHint: m.popularityHint,
         }
       })
+  } else {
+    // ── Fall back to locale-aware templates ──
+    const templates = localeTemplatesFor(mealType, cuisineRegion, wantVeg, wantNonVeg, vegan)
+    const note = SOURCE_NOTE[itemBasis]
+
+    items = templates
+      .filter((t) => {
+        if (strictVeg && t.vegType === 'non_veg') return false
+        return true
+      })
+      .map((t) => {
+        const min = Math.max(1, Math.round(spend.perPersonMin * t.share))
+        const max = Math.max(min + 1, Math.round(spend.perPersonMax * t.share))
+        return {
+          name: t.name,
+          category: t.category,
+          role: inferDishRole(t.name, t.category),
+          vegType: t.vegType,
+          estimatedPriceMin: min,
+          estimatedPriceMax: max,
+          currency,
+          confidence: spend.confidence,
+          basis: itemBasis,
+          sourceNote: note,
+        }
+      })
   }
 
-  // ── Fall back to locale-aware templates ──
-  const templates = localeTemplatesFor(mealType, cuisineRegion, wantVeg, wantNonVeg, vegan)
-  const note = SOURCE_NOTE[itemBasis]
-
-  return templates
-    .filter((t) => {
-      if (strictVeg && t.vegType === 'non_veg') return false
-      return true
-    })
-    .map((t) => {
-      const min = Math.max(1, Math.round(spend.perPersonMin * t.share))
-      const max = Math.max(min + 1, Math.round(spend.perPersonMax * t.share))
-      return {
-        name: t.name,
-        category: t.category,
-        vegType: t.vegType,
-        estimatedPriceMin: min,
-        estimatedPriceMax: max,
-        currency,
-        confidence: spend.confidence,
-        basis: itemBasis,
-        sourceNote: note,
-      }
-    })
+  // PARTS 6/7/8 — never show an incomplete lunch/dinner (e.g. only a bread/side).
+  return ensureCompleteMeal(items, mealType, cuisineRegion, restaurantName, foodPreferences, dietaryProfile, spend, currency)
 }
 
 // ── Score-based candidate selection (PART 3) ─────────────────────────────────
@@ -812,7 +946,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const priceLevel = details?.priceLevel ?? top.priceLevel
     const spend = estimateSpend(priceLevel, foodBudgetStyle, travellerCount, currency, reviewClue)
     const tags = buildReasonTags(details?.rating ?? top.rating, priceLevel, details?.types ?? top.types, spend.basis, dietaryProfile)
-    const suggestedItems = buildSuggestedItems(fa.mealType, foodPreferences, spend, currency, cuisineRegion, dietaryProfile, reviewMentions)
+    const suggestedItems = buildSuggestedItems(fa.mealType, foodPreferences, spend, currency, cuisineRegion, dietaryProfile, reviewMentions, details?.name ?? top.name)
 
     const menuSourceUrl = details?.websiteUri
     const menuSourceType: FoodEnrichmentPatch['menuSourceType'] | undefined = menuSourceUrl

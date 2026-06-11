@@ -37,6 +37,8 @@ export type ValidationIssueType =
   | 'route_optimise_failed'
   | 'departure_conflict'
   | 'meal_time_mismatch'
+  | 'post_departure_activity'
+  | 'incomplete_meal'
 
 export interface ValidationIssue {
   type: ValidationIssueType
@@ -144,6 +146,10 @@ export interface ItineraryValidationInput {
   departureConflict?: string | null
   /** Meal-time mismatch count (e.g. dinner at 16:45). Triggers advisory warning. */
   mealTimeMismatchCount?: number
+  /** City activities still scheduled after a terminal departure (impossible). Blocks save. */
+  postDepartureActivityCount?: number
+  /** Lunch/dinner suggestions missing a main dish (incomplete meal set). Advisory. */
+  incompleteMealCount?: number
 }
 
 export interface ItineraryValidationResult {
@@ -195,6 +201,20 @@ export function validateItinerary(input: ItineraryValidationInput): ItineraryVal
       type: 'meal_time_mismatch',
       severity: 'warning',
       message: `${input.mealTimeMismatchCount} meal break(s) are scheduled outside their typical time window — check labels or adjust timings.`,
+    })
+  }
+  if (input.postDepartureActivityCount && input.postDepartureActivityCount > 0) {
+    issues.push({
+      type: 'post_departure_activity',
+      severity: 'block',
+      message: `${input.postDepartureActivityCount} stop(s) are scheduled after you depart — you can't visit a city place once you've left. Remove or reorder them.`,
+    })
+  }
+  if (input.incompleteMealCount && input.incompleteMealCount > 0) {
+    issues.push({
+      type: 'incomplete_meal',
+      severity: 'warning',
+      message: `${input.incompleteMealCount} meal suggestion(s) look incomplete (e.g. only a bread/side) — add a main dish before relying on the budget.`,
     })
   }
 
