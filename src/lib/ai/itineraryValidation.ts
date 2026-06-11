@@ -36,6 +36,7 @@ export type ValidationIssueType =
   | 'non_chronological'
   | 'route_optimise_failed'
   | 'departure_conflict'
+  | 'meal_time_mismatch'
 
 export interface ValidationIssue {
   type: ValidationIssueType
@@ -141,6 +142,8 @@ export interface ItineraryValidationInput {
   routeOptimiseFailed?: boolean
   /** Departure-day conflict message, when detected. */
   departureConflict?: string | null
+  /** Meal-time mismatch count (e.g. dinner at 16:45). Triggers advisory warning. */
+  mealTimeMismatchCount?: number
 }
 
 export interface ItineraryValidationResult {
@@ -185,6 +188,13 @@ export function validateItinerary(input: ItineraryValidationInput): ItineraryVal
       type: 'departure_conflict',
       severity: 'block',
       message: input.departureConflict,
+    })
+  }
+  if (input.mealTimeMismatchCount && input.mealTimeMismatchCount > 0) {
+    issues.push({
+      type: 'meal_time_mismatch',
+      severity: 'warning',
+      message: `${input.mealTimeMismatchCount} meal break(s) are scheduled outside their typical time window — check labels or adjust timings.`,
     })
   }
 

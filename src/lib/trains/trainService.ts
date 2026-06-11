@@ -1,5 +1,5 @@
 /**
- * Train data service — Phase 16G (PART 7 + PART 10).
+ * Train data service — Phase 16G (PART 7 + PART 10 + hotfix Parts 1–3).
  *
  * A single abstraction the UI talks to, so it never needs to know whether a
  * train/station came from an authorised live API, an imported official
@@ -12,6 +12,13 @@
  *
  * No scraping. The live-API and import layers are optional and registered at
  * runtime; until then everything resolves against the local seed.
+ *
+ * Hotfix additions (Parts 1–3):
+ *   • getStationSchedule(trainNumber, stationCode)
+ *   • getTrainLegTiming(trainNumber, fromCode, toCode)
+ *   • getImportDataStatus() — UI banner when only seed data is loaded
+ *   • Auto-load src/data/imported/railwayTimetable.json and
+ *     src/data/imported/railwayStations.json when those files are non-empty.
  */
 
 import {
@@ -26,10 +33,25 @@ import {
   searchRailwayStations,
   type IndiaRailwayStation,
 } from '@/data/indiaRailwayStations'
+import { parseTimetableImport } from '@/lib/trains/timetableImport'
+import importedTimetableRaw from '@/data/imported/railwayTimetable.json'
+import importedStationsRaw from '@/data/imported/railwayStations.json'
+
+// ── Auto-load imported datasets when non-empty files are dropped in ──────────
+
+const _fileTrains: IndiaTrainData[] = parseTimetableImport(importedTimetableRaw)
+const _fileStations: IndiaRailwayStation[] = (() => {
+  if (!Array.isArray(importedStationsRaw) || importedStationsRaw.length === 0) return []
+  return (importedStationsRaw as unknown[]).filter(
+    (s): s is IndiaRailwayStation =>
+      typeof s === 'object' && s !== null && typeof (s as IndiaRailwayStation).code === 'string',
+  )
+})()
 
 // ── Registry: imported / live datasets layered over the local seed ───────────
 
-let importedTrains: IndiaTrainData[] = []
+let importedTrains: IndiaTrainData[] = _fileTrains
+let importedStations: IndiaRailwayStation[] = _fileStations
 let liveApiTrains: IndiaTrainData[] = []
 
 /**
@@ -39,6 +61,11 @@ let liveApiTrains: IndiaTrainData[] = []
  */
 export function registerImportedTimetable(trains: IndiaTrainData[]): void {
   importedTrains = trains
+}
+
+/** Register additional stations from an imported dataset (overrides seed by code). */
+export function registerImportedStations(stations: IndiaRailwayStation[]): void {
+  importedStations = stations
 }
 
 /** Register results from an authorised live API (highest priority). */
@@ -51,6 +78,31 @@ export function activeTrainSource(): TrainDataSource {
   if (liveApiTrains.length) return 'authorised_api'
   if (importedTrains.length) return 'official_timetable_import'
   return 'local_seed'
+}
+
+export interface ImportDataStatus {
+  timetableLoaded: boolean
+  stationsLoaded: boolean
+  /** Human-readable note for the UI when running on seed data only. */
+  limitedDataMessage: string | null
+}
+
+/**
+ * Status banner for the UI: when only seed data is available, surfaces the
+ * "Full train timetable dataset not loaded. Showing limited local results."
+ * message so users know to verify at IRCTC.
+ */
+export function getImportDataStatus(): ImportDataStatus {
+  const timetableLoaded = liveApiTrains.length > 0 || importedTrains.length > 0
+  const stationsLoaded = importedStations.length > 0
+  return {
+    timetableLoaded,
+    stationsLoaded,
+    limitedDataMessage:
+      !timetableLoaded
+        ? 'Full train timetable dataset not loaded. Showing limited local results.'
+        : null,
+  }
 }
 
 /**
@@ -71,14 +123,155 @@ export interface StationResult extends IndiaRailwayStation {
   source: TrainDataSource
 }
 
-/** Search stations by name/code/city/alias. */
+/** Search stations by name/code/city/alias. Imported stations override seed by code. */
 export function searchStations(query: string, limit = 8): StationResult[] {
-  return searchRailwayStations(query, limit).map((s) => ({ ...s, source: 'local_seed' as const }))
+  const q = query.trim().toLowerCase()
+  // Merge seed + imported, with imported taking precedence by code.
+  const byCode = new Map<string, IndiaRailwayStation>()
+  for (const s of INDIA_RAILWAY_STATIONS) byCode.set(s.code.toUpperCase(), s)
+  for (const s of importedStations) byCode.set(s.code.toUpperCase(), s)
+
+  const all = Array.from(byCode.values())
+  if (!q) return all.slice(0, limit).map((s) => ({ ...s, source: importedStations.some((is) => is.code.toUpperCase() === s.code.toUpperCase()) ? 'official_timetable_import' as const : 'local_seed' as const }))
+
+  const matches = all.filter(
+    (s) =>
+      s.code.toLowerCase().includes(q) ||
+      s.name.toLowerCase().includes(q) ||
+      (s.city ?? '').toLowerCase().includes(q) ||
+      (s.aliases ?? []).some((a) => a.toLowerCase().includes(q)),
+  )
+
+  return matches.slice(0, limit).map((s) => {
+    const isImported = importedStations.some((is) => is.code.toUpperCase() === s.code.toUpperCase())
+    return { ...s, source: isImported ? 'official_timetable_import' as const : 'local_seed' as const }
+  })
 }
 
 export function getStationByCode(code: string): IndiaRailwayStation | null {
   const c = code.trim().toUpperCase()
+  // Check imported stations first (higher priority).
+  const imported = importedStations.find((s) => s.code.toUpperCase() === c)
+  if (imported) return imported
   return INDIA_RAILWAY_STATIONS.find((s) => s.code.toUpperCase() === c) ?? null
+}
+
+// ── PART 1: Station schedule + leg timing ────────────────────────────────────
+
+/** A single stop's schedule entry for a train. */
+export interface StationScheduleEntry {
+  stationCode: string
+  stationName?: string
+  /** Scheduled arrival at this stop (HH:MM). Absent for the origin. */
+  arrival?: string
+  /** Scheduled departure from this stop (HH:MM). Absent for the terminus. */
+  departure?: string
+  /** Day offset from train start date (0 = same day, 1 = next day). */
+  dayOffset?: number
+  distanceKm?: number
+}
+
+/** The computed timing for a journey leg between two stops on a single train. */
+export interface TrainLegTiming {
+  trainNumber: string
+  trainName: string
+  fromStation: StationScheduleEntry
+  toStation: StationScheduleEntry
+  /** Departure from origin stop (HH:MM). Null when not in data. */
+  departureTime: string | null
+  /** Arrival at destination stop (HH:MM). Null when not in data. */
+  arrivalTime: string | null
+  /** Approximate journey minutes. Null when times are unavailable. */
+  durationMinutes: number | null
+}
+
+function parseHHMMToMins(t?: string): number | null {
+  if (!t) return null
+  const [h, m] = t.split(':').map(Number)
+  if (h == null || isNaN(h) || m == null || isNaN(m)) return null
+  return h * 60 + m
+}
+
+/**
+ * Return the scheduled arrival/departure of a specific station on a train.
+ * Checks station-wise timings first, then falls back to origin/terminus fields.
+ */
+export function getStationSchedule(
+  trainNumber: string,
+  stationCode: string,
+): StationScheduleEntry | null {
+  const train = getTrainDetails(trainNumber)
+  if (!train) return null
+  const code = stationCode.trim().toUpperCase()
+
+  // Prefer full station-wise timings when available.
+  if (train.stationTimings?.length) {
+    const stop = train.stationTimings.find((s) => s.code.toUpperCase() === code)
+    if (stop) {
+      return {
+        stationCode: code,
+        arrival: stop.arr,
+        departure: stop.dep,
+        dayOffset: stop.dayOffset,
+      }
+    }
+  }
+
+  // Fall back to origin/terminus fields.
+  if (train.fromStationCode?.toUpperCase() === code) {
+    return { stationCode: code, departure: train.departureTime, dayOffset: 0 }
+  }
+  if (train.toStationCode?.toUpperCase() === code) {
+    return { stationCode: code, arrival: train.arrivalTime, dayOffset: train.arrivalDayOffset ?? 0 }
+  }
+
+  // The station is on the route but no timing data is available.
+  if (train.routeStationCodes.some((c) => c.toUpperCase() === code)) {
+    return { stationCode: code }
+  }
+
+  return null
+}
+
+/**
+ * Get departure/arrival and journey duration for a leg between two stations on
+ * a train. Returns null if either station is not on the train's route.
+ */
+export function getTrainLegTiming(
+  trainNumber: string,
+  fromStationCode: string,
+  toStationCode: string,
+): TrainLegTiming | null {
+  const train = getTrainDetails(trainNumber)
+  if (!train) return null
+
+  const fromEntry = getStationSchedule(trainNumber, fromStationCode)
+  const toEntry = getStationSchedule(trainNumber, toStationCode)
+  if (!fromEntry || !toEntry) return null
+
+  const depTime = fromEntry.departure ?? null
+  const arrTime = toEntry.arrival ?? null
+
+  let durationMinutes: number | null = null
+  if (depTime && arrTime) {
+    const depMins = parseHHMMToMins(depTime)
+    const arrMins = parseHHMMToMins(arrTime)
+    if (depMins != null && arrMins != null) {
+      const dayDiff = ((toEntry.dayOffset ?? 0) - (fromEntry.dayOffset ?? 0)) * 24 * 60
+      const raw = arrMins - depMins + dayDiff
+      if (raw > 0) durationMinutes = raw
+    }
+  }
+
+  return {
+    trainNumber,
+    trainName: train.trainName,
+    fromStation: fromEntry,
+    toStation: toEntry,
+    departureTime: depTime,
+    arrivalTime: arrTime,
+    durationMinutes,
+  }
 }
 
 // ── Trains ───────────────────────────────────────────────────────────────────
@@ -218,15 +411,23 @@ export function validateTrainForRoute(
 }
 
 /**
- * User-facing one-line label for a train + direction + timing. Never shows
- * internal "Up/Down" naming — always number, name, From → To, dep → arr.
+ * Full user-facing one-line label for a train.
+ * Format: "12314 Sealdah Rajdhani Express — NDLS 16:30 → SDAH 10:10 +1"
+ * Never shows "Up/Down" naming.
  */
 export function formatTrainLabel(train: IndiaTrainData): string {
-  const dir = train.routeDescription
-  const dep = train.departureTime ? `Dep ${train.departureTime}` : ''
-  const arr = train.arrivalTime
-    ? `Arr ${train.arrivalTime}${train.arrivalDayOffset ? ` +${train.arrivalDayOffset}` : ''}`
-    : ''
-  const timing = [dep, arr].filter(Boolean).join(' → ')
-  return `${train.trainNumber} ${train.trainName} — ${dir}${timing ? ` — ${timing}` : ''}`
+  const from = train.fromStationCode ?? ''
+  const to = train.toStationCode ?? ''
+  const dep = train.departureTime ?? ''
+  const arr = train.arrivalTime ?? ''
+  const offset = train.arrivalDayOffset ? ` +${train.arrivalDayOffset}` : ''
+
+  if (from && to && dep && arr) {
+    return `${train.trainNumber} ${train.trainName} — ${from} ${dep} → ${to} ${arr}${offset}`
+  }
+  if (from && to) {
+    return `${train.trainNumber} ${train.trainName} — ${from} → ${to}${dep ? ` Dep ${dep}` : ''}${arr ? ` Arr ${arr}${offset}` : ''}`
+  }
+  const timing = [dep ? `Dep ${dep}` : '', arr ? `Arr ${arr}${offset}` : ''].filter(Boolean).join(' → ')
+  return `${train.trainNumber} ${train.trainName} — ${train.routeDescription}${timing ? ` — ${timing}` : ''}`
 }

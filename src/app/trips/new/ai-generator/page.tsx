@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Sparkles, MessageSquare, HelpCircle, LayoutGrid,
-  ChevronRight, AlertTriangle, Loader2, Home, Wallet, Upload, Check,
+  ChevronRight, AlertTriangle, Loader2, Home, Wallet, Upload, Check, Info,
 } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import { createTrip, updateItineraryDay, getItineraryDays } from '@/lib/firestore'
@@ -23,7 +23,7 @@ import { type IndiaCity, searchCities } from '@/data/indiaCities'
 import { type IndiaRailwayStation, searchRailwayStations } from '@/data/indiaRailwayStations'
 import { type IndiaAirport, searchAirports } from '@/data/indiaAirports'
 import { type IndiaTrainData, validateTrainRoute, fetchTrainDetails, getSuggestedReturnTrain } from '@/data/indiaTrains'
-import { searchTrains as trainServiceSearch, type TrainSearchResult } from '@/lib/trains/trainService'
+import { searchTrains as trainServiceSearch, formatTrainLabel, getImportDataStatus, type TrainSearchResult } from '@/lib/trains/trainService'
 import type {
   TripType, TripGenerationPreferences, TripInterest, FoodPreference,
   TravelPace, TripGeneratorInput, TripGeneratorResult, GeneratedActivity, Activity,
@@ -1866,23 +1866,25 @@ export default function NewTripAiGeneratorPage() {
                       onCustom={setToStationCustom}
                     />
                   </div>
+                  {/* Part 2: Limited-data banner when only local seed is loaded */}
+                  {(() => {
+                    const status = getImportDataStatus()
+                    return status.limitedDataMessage ? (
+                      <p className="text-[11px] text-gray-400 flex items-center gap-1">
+                        <Info size={11} /> {status.limitedDataMessage}
+                      </p>
+                    ) : null
+                  })()}
                   <SearchableSelect<TrainSearchResult>
                     label="Train (optional)"
                     placeholder="Search by number, name or type — e.g. 12314, Rajdhani"
                     search={(q) => trainServiceSearch(q, { fromCode: brief.fromStation?.code, toCode: brief.toStation?.code })}
                     getKey={(r) => r.train.trainNumber}
-                    renderPrimary={(r) => `${r.train.trainNumber} · ${r.train.trainName}`}
+                    renderPrimary={(r) => formatTrainLabel(r.train)}
                     renderSecondary={(r) => {
-                      const t = r.train
-                      const timing = t.departureTime && t.arrivalTime
-                        ? ` · Dep ${t.departureTime} → Arr ${t.arrivalTime}${t.arrivalDayOffset ? ` +${t.arrivalDayOffset}` : ''}`
-                        : ''
-                      const flag = r.routeMatch === 'reverse'
-                        ? '  ⚠ Opposite direction'
-                        : r.routeMatch === 'mismatch'
-                          ? '  ⚠ Other match — route mismatch'
-                          : ''
-                      return `${t.routeDescription}${timing}${flag}`
+                      if (r.routeMatch === 'reverse') return '⚠ Opposite direction'
+                      if (r.routeMatch === 'mismatch') return '⚠ Route mismatch — verify before booking'
+                      return r.train.daysOfRun ? `Runs: ${r.train.daysOfRun}` : r.train.routeDescription
                     }}
                     onSelect={(r) => selectTrain(r.train)}
                     selectedPrimary={brief.trainNumber ? `${brief.trainNumber}${brief.trainName ? ` · ${brief.trainName}` : ''}` : null}

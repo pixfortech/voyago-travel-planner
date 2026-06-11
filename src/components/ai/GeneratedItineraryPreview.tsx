@@ -46,6 +46,7 @@ import {
   checkElevationSanity, validateItinerary,
   type ValidationActivity, type DestinationRef,
 } from '@/lib/ai/itineraryValidation'
+import { validateMealTime, repairMealCategory } from '@/lib/ai/mealTimeSanity'
 
 export interface EditableGeneratedActivity extends GeneratedActivity {
   _key: string
@@ -75,6 +76,14 @@ export interface EditableGeneratedActivity extends GeneratedActivity {
   _activityContext?: ActivityContext
   // Phase 16D refinement — keys of suggested food items the user removed (excluded from budget)
   _removedItemKeys?: string[]
+  // Hotfix Part 8 — locality/area extracted from Google place address
+  _locationContext?: {
+    locality?: string   // neighbourhood / area (e.g. "Maidan", "Belur")
+    city?: string       // city name (e.g. "Kolkata", "Howrah")
+    state?: string      // state abbreviation (e.g. "WB")
+  }
+  // Hotfix Part 7 — meal-time mismatch warning
+  _mealTimeIssue?: string
 }
 export interface EditableGeneratedDay {
   date: string
@@ -153,6 +162,38 @@ function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: numbe
   const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng)
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
+}
+
+// ── Part 8: locality extraction from Google formattedAddress ─────────────────
+
+const INDIA_STATES = new Set([
+  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Delhi',
+  'Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala',
+  'Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland',
+  'Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura',
+  'Uttar Pradesh','Uttarakhand','West Bengal','Chandigarh','J&K','Jammu and Kashmir',
+  'Ladakh',
+])
+
+function extractLocality(address?: string): EditableGeneratedActivity['_locationContext'] {
+  if (!address) return undefined
+  const parts = address.split(',').map((p) => p.trim()).filter(Boolean)
+  // Remove India, postcodes (6-digit), and state names from the back.
+  const meaningful = parts.filter(
+    (p) =>
+      !/^India$/i.test(p) &&
+      !/^\d{4,}/.test(p) &&
+      !INDIA_STATES.has(p) &&
+      !p.match(/\d{6}/),
+  )
+  if (meaningful.length === 0) return undefined
+  // Last element is the city; second-to-last is the locality/area.
+  const city = meaningful[meaningful.length - 1]
+  const locality =
+    meaningful.length >= 2 ? meaningful[meaningful.length - 2] : undefined
+  // Don't show locality when it repeats the city.
+  const area = locality && locality !== city ? locality : undefined
+  return { city, locality: area }
 }
 
 /** Verification state for a single activity (drives badges + apply gating). */
@@ -428,6 +469,8 @@ export default function GeneratedItineraryPreview({
             _enriched: true,
             needsVerification: undefined,   // resolved
             locationName: top.name,
+            // Part 8: extract locality/city from the formatted address.
+            _locationContext: extractLocality(top.address),
           }
           if (refinedCat && refinedCat !== 'other') { update.category = refinedCat; update._autoCategory = true }
           updates.set(t.key, update)
@@ -745,9 +788,24 @@ export default function GeneratedItineraryPreview({
       const chrono = validateChronology(patchedActivities)
       const chronoWarning = chrono.ok ? undefined : 'Timing needs review — route order may be inaccurate.'
 
+      // Part 7 — meal-time sanity: annotate mismatches and auto-repair the label.
+      const repairedActivities = patchedActivities.map((a) => {
+        if (a._removed || a.category !== 'food' || !a.mealType) return a
+        const time = a._plannedStart ?? a.startTime
+        const issue = validateMealTime(a.mealType, time)
+        if (!issue) return { ...a, _mealTimeIssue: undefined }
+        // Auto-repair: update the mealType so the title label is correct.
+        const repairedMeal = repairMealCategory(a.mealType, time)
+        return {
+          ...a,
+          mealType: repairedMeal as typeof a.mealType,
+          _mealTimeIssue: issue.message,
+        }
+      })
+
       return {
         ...d,
-        activities: patchedActivities,
+        activities: repairedActivities,
         _timingSummary: {
           dayStart: summary.dayStart,
           dayEnd: summary.dayEnd,
@@ -1023,6 +1081,14 @@ export default function GeneratedItineraryPreview({
 
     const routeOptimiseFailed = Object.values(dayRoutes).some((r) => r.optimiseStatus === 'failed')
 
+    // Part 7 + Part 10 — count meal-time mismatches.
+    let mealTimeMismatchCount = 0
+    for (const d of editDays) {
+      for (const a of d.activities) {
+        if (!a._removed && a._mealTimeIssue) mealTimeMismatchCount++
+      }
+    }
+
     const dest: DestinationRef = {
       city: destinationContext?.city,
       lat: destinationContext?.lat,
@@ -1030,7 +1096,7 @@ export default function GeneratedItineraryPreview({
     }
     return validateItinerary({
       activities, destination: dest, chronologyIssueCount: chronoIssueCount,
-      routeOptimiseFailed, departureConflict,
+      routeOptimiseFailed, departureConflict, mealTimeMismatchCount,
     })
   }, [editDays, dayRoutes, destinationContext])
 
@@ -1428,6 +1494,12 @@ function ActivityRow({
 }) {
   const [open, setOpen] = useState(false)
   const v = verifyState(act)
+
+  // Part 8: compact locality label shown in collapsed view.
+  const localityLabel = act._locationContext?.locality
+    ? `${act._locationContext.locality}${act._locationContext.city && act._locationContext.city !== act._locationContext.locality ? `, ${act._locationContext.city}` : ''}`
+    : act._locationContext?.city ?? undefined
+
   return (
     <div className={`rounded-xl border p-2 ${act._removed ? 'opacity-40 border-gray-100 bg-gray-50' : 'border-gray-150 bg-white'}`}>
       <div className="flex items-center gap-2">
@@ -1438,11 +1510,19 @@ function ActivityRow({
           className="w-14 text-xs font-mono text-gray-500 bg-gray-50 rounded-lg px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
         />
         <div className="flex-1 min-w-0">
-          <input
-            value={act.title}
-            onChange={(e) => onPatch({ title: e.target.value })}
-            className="w-full text-sm text-gray-800 bg-transparent focus:outline-none"
-          />
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <input
+              value={act.title}
+              onChange={(e) => onPatch({ title: e.target.value })}
+              className="flex-1 min-w-0 text-sm text-gray-800 bg-transparent focus:outline-none"
+            />
+            {/* Part 8: locality shown beside title in collapsed view */}
+            {localityLabel && !open && (
+              <span className="text-[9px] text-gray-400 whitespace-nowrap flex items-center gap-0.5">
+                <MapPin size={8} className="flex-shrink-0" /> {localityLabel}
+              </span>
+            )}
+          </div>
           {/* Badges */}
           <div className="flex items-center flex-wrap gap-1 mt-0.5">
             {act.isBreak && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-500">Break</span>}
@@ -1452,6 +1532,8 @@ function ActivityRow({
             {v === 'unverified' && !suspect && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600"><ShieldAlert size={9} /> Unverified</span>}
             {act._autoCategory && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-500">Auto-category</span>}
             {act._placeRating != null && <span className="text-[9px] text-gray-400">★ {act._placeRating}{act._placeUserRatings ? ` (${act._placeUserRatings})` : ''}</span>}
+            {/* Part 7: meal-time mismatch warning badge */}
+            {act._mealTimeIssue && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600" title={act._mealTimeIssue}><AlertTriangle size={8} /> Meal time adjusted</span>}
           </div>
           {/* Phase 16D — restaurant suggestion for food breaks */}
           {act.restaurantSuggestion && act.category === 'food' && (
@@ -1508,7 +1590,7 @@ function ActivityRow({
               )}
             </>
           )}
-          {/* Phase 16E — planned timing */}
+          {/* Phase 16E — planned timing (collapsed) */}
           {act._plannedStart && act._durationMins != null && act._durationMins > 0 && (
             <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400">
               <Clock size={9} className="flex-shrink-0" />
@@ -1533,7 +1615,7 @@ function ActivityRow({
               )}
             </div>
           )}
-          {/* Phase 16F — location context (elevation / weather / AQI) + warnings */}
+          {/* Phase 16F — location context shown in collapsed view */}
           <ActivityContextLines ctx={act._activityContext} />
         </div>
         <input
@@ -1542,7 +1624,7 @@ function ActivityRow({
           onChange={(e) => onPatch({ estimatedCost: Number(e.target.value) || 0 })}
           className="w-16 text-xs text-gray-500 bg-gray-50 rounded-lg px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 self-start"
         />
-        <button onClick={() => setOpen((vv) => !vv)} className="text-gray-400 hover:bg-gray-100 rounded-lg p-1 self-start" title="Details">
+        <button onClick={() => setOpen((vv) => !vv)} className="text-gray-400 hover:bg-gray-100 rounded-lg p-1 self-start" title={open ? 'Hide details' : 'Show details'}>
           <ArrowRightLeft size={13} />
         </button>
         <button onClick={onToggleRemove}
@@ -1554,6 +1636,19 @@ function ActivityRow({
 
       {open && (
         <div className="mt-2 pt-2 border-t border-gray-100 grid sm:grid-cols-2 gap-2">
+          {/* Part 8: full locality display in expanded */}
+          {localityLabel && (
+            <p className="text-[11px] text-gray-500 sm:col-span-2 flex items-center gap-1">
+              <MapPin size={11} className="text-violet-400 flex-shrink-0" />
+              {localityLabel}
+            </p>
+          )}
+          {/* Part 7: meal-time mismatch detail */}
+          {act._mealTimeIssue && (
+            <p className="text-[11px] text-orange-600 sm:col-span-2 flex items-start gap-1">
+              <AlertTriangle size={11} className="flex-shrink-0 mt-0.5" /> {act._mealTimeIssue}
+            </p>
+          )}
           <label className="text-[11px] text-gray-500">
             Category
             <select

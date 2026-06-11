@@ -28,8 +28,21 @@ export interface RawTimetableTrain {
   classes?: string[]
   pantry?: boolean
   reverseTrainNumber?: string | number
-  /** Station-wise timings: [{ code, arr, dep, dayOffset }]. */
+  /** Station-wise timings (canonical field): [{ code, arr, dep, dayOffset }]. */
   stationTimings?: Array<{ code?: string; arr?: string; dep?: string; dayOffset?: number }>
+  /**
+   * Alias accepted from official timetable exports that use this name.
+   * Fields: { stationCode, stationName, arrivalTime, departureTime, dayOffset, distanceKm }.
+   * Merged with stationTimings; stationTimings takes precedence per entry.
+   */
+  stationWiseSchedule?: Array<{
+    stationCode?: string
+    stationName?: string
+    arrivalTime?: string
+    departureTime?: string
+    dayOffset?: number
+    distanceKm?: number
+  }>
 }
 
 const VALID_TRAIN_TYPES: TrainType[] = [
@@ -63,16 +76,20 @@ export function parseTimetableImport(raw: unknown): IndiaTrainData[] {
     const trainName = str(r.trainName)
     if (!trainNumber || !trainName) continue
 
-    const stationTimings: TrainStationStop[] | undefined = Array.isArray(r.stationTimings)
-      ? r.stationTimings
-          .map((s) => ({
-            code: str(s.code) ?? '',
-            arr: str(s.arr),
-            dep: str(s.dep),
-            dayOffset: typeof s.dayOffset === 'number' ? s.dayOffset : undefined,
-          }))
-          .filter((s) => s.code)
-      : undefined
+    // Merge stationTimings + stationWiseSchedule (canonical field wins per code).
+    const rawTimings: TrainStationStop[] = []
+    if (Array.isArray(r.stationTimings)) {
+      for (const s of r.stationTimings) {
+        const code = str(s.code)
+        if (code) rawTimings.push({ code, arr: str(s.arr), dep: str(s.dep), dayOffset: typeof s.dayOffset === 'number' ? s.dayOffset : undefined })
+      }
+    } else if (Array.isArray(r.stationWiseSchedule)) {
+      for (const s of r.stationWiseSchedule) {
+        const code = str(s.stationCode)
+        if (code) rawTimings.push({ code, arr: str(s.arrivalTime), dep: str(s.departureTime), dayOffset: typeof s.dayOffset === 'number' ? s.dayOffset : undefined })
+      }
+    }
+    const stationTimings: TrainStationStop[] | undefined = rawTimings.length ? rawTimings : undefined
 
     const routeStationCodes =
       Array.isArray(r.routeStationCodes) && r.routeStationCodes.length
