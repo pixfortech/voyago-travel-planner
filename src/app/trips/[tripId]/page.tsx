@@ -192,38 +192,41 @@ export default function TripOverviewPage() {
           {/* Stats row */}
           <motion.div {...fadeUp(0.06)} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {/* Days */}
-            <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+            <div className="rounded-xl p-4 border shadow-sm" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
               <div className="inline-flex items-center gap-1.5 bg-primary-50 text-primary-600 px-2 py-1 rounded-lg mb-2 text-xs font-semibold">
                 <Calendar size={11} /> Days
               </div>
-              <p className="text-2xl font-black text-gray-900 leading-none">{days}</p>
-              <p className="text-[11px] text-gray-400 mt-1">night trip</p>
+              <p className="text-2xl font-black leading-none" style={{ color: 'var(--foreground)' }}>{days}</p>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--muted-foreground)' }}>night trip</p>
             </div>
 
             {/* Travellers */}
-            <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+            <div className="rounded-xl p-4 border shadow-sm" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
               <div className="inline-flex items-center gap-1.5 bg-violet-50 text-violet-600 px-2 py-1 rounded-lg mb-2 text-xs font-semibold">
                 <Users size={11} /> People
               </div>
-              <p className="text-2xl font-black text-gray-900 leading-none">{travellerCount}</p>
-              <p className="text-[11px] text-gray-400 mt-1">{tripTypeLabel(trip.type)}</p>
+              <p className="text-2xl font-black leading-none" style={{ color: 'var(--foreground)' }}>{travellerCount}</p>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--muted-foreground)' }}>{tripTypeLabel(trip.type)}</p>
             </div>
 
             {/* Spent */}
-            <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+            <div className="rounded-xl p-4 border shadow-sm" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
               <div className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-600 px-2 py-1 rounded-lg mb-2 text-xs font-semibold">
                 <TrendingUp size={11} /> Spent
               </div>
-              <p className="text-lg font-black text-gray-900 leading-none truncate">
+              <p className="text-lg font-black leading-none truncate" style={{ color: 'var(--foreground)' }}>
                 {spent > 0 ? formatCurrency(spent, trip.currency) : '—'}
               </p>
-              <p className="text-[11px] text-gray-400 mt-1">
+              <p className="text-[11px] mt-1" style={{ color: 'var(--muted-foreground)' }}>
                 {perHeadSpent > 0 ? `${formatCurrency(perHeadSpent, trip.currency)}/head` : 'no expenses'}
               </p>
             </div>
 
             {/* Remaining */}
-            <div className={`bg-white rounded-2xl p-4 border shadow-sm ${isOverBudget ? 'border-red-100' : 'border-gray-100'}`}>
+            <div
+              className={`rounded-xl p-4 border shadow-sm ${isOverBudget ? 'border-red-200' : ''}`}
+              style={!isOverBudget ? { backgroundColor: 'var(--card)', borderColor: 'var(--border)' } : { backgroundColor: 'var(--card)' }}
+            >
               <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg mb-2 text-xs font-semibold ${isOverBudget ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
                 <Wallet size={11} /> {isOverBudget ? 'Over' : 'Left'}
               </div>
