@@ -29,6 +29,8 @@ import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import WarningBanner from '@/components/vy/WarningBanner'
 import BudgetMeter from '@/components/vy/BudgetMeter'
+import VyItineraryComposition from './VyItineraryComposition'
+import { useLayout } from '@/context/LayoutContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { mapPlaceTypesToCategory } from '@/lib/maps/categoryMapping'
 import type {
@@ -383,6 +385,7 @@ export default function GeneratedItineraryPreview({
   autoEnrich = false, budgetContext, destinationContext, transportMode,
   onApply, onDiscard, onRegenerate,
 }: PreviewProps) {
+  const { isNewLayout } = useLayout()
   const [editDays, setEditDays] = useState<EditableGeneratedDay[]>([])
   // Authoritative mirror of editDays, updated synchronously by commitDays so async
   // enrich/optimise loops (and back-to-back edits) always read the latest state.
@@ -1209,6 +1212,52 @@ export default function GeneratedItineraryPreview({
   }, [editDays, dayRoutes, destinationContext])
 
   const c = result.comfortSummary
+
+  // ── NEW LAYOUT: render the Claude Design composition. Same computed data and
+  // handlers as the classic render below — presentation only, no logic change. ─
+  if (isNewLayout) {
+    return (
+      <VyItineraryComposition
+        result={result}
+        currency={currency}
+        travellerCount={travellerCount}
+        isMock={isMock}
+        applying={applying}
+        applyNote={applyNote}
+        mapsAvailable={mapsAvailable}
+        applyLabel={applyLabel}
+        applyingLabel={applyingLabel}
+        transportMode={transportMode}
+        budgetContext={budgetContext}
+        destinationContext={destinationContext}
+        editDays={editDays}
+        dayRoutes={dayRoutes}
+        stats={stats}
+        geocodedCount={geocodedCount}
+        budgetSplit={budgetSplit}
+        validation={validation}
+        timeZone={timeZone}
+        enrichNote={enrichNote}
+        autoRunning={autoRunning}
+        busy={busy}
+        enriching={enriching}
+        optimisingAll={optimisingAll}
+        optimisingDay={optimisingDay}
+        anyStale={anyStale}
+        hasUnverified={hasUnverified}
+        confirmSave={confirmSave}
+        onEnrich={handleEnrich}
+        onOptimiseAll={optimiseAllDays}
+        onOptimiseDay={optimiseDay}
+        onPatch={patch}
+        onToggleRemove={toggleRemove}
+        onMove={moveToDay}
+        onApplyClick={handleApplyClick}
+        onRegenerate={onRegenerate}
+        onDiscard={onDiscard}
+      />
+    )
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
