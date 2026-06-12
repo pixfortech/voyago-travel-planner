@@ -21,15 +21,23 @@ export default function TripCard({ trip, onDelete }: TripCardProps) {
       className="relative group"
     >
       <Link href={`/trips/${trip.id}`} className="block">
-        <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
-          {/* Color accent banner */}
-          <div className="h-2.5" style={{ backgroundColor: trip.coverColor }} />
+        <div
+          className="rounded-xl overflow-hidden border transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
+          style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
+        >
+          {/* Coloured accent strip */}
+          <div className="h-1.5" style={{ backgroundColor: trip.coverColor }} />
 
           <div className="p-4">
             <div className="flex items-start justify-between mb-3">
               <div className="flex-1 min-w-0 pr-2">
-                <h3 className="font-bold text-gray-900 text-base leading-tight truncate">{trip.name}</h3>
-                <div className="flex items-center gap-1 mt-0.5 text-gray-400">
+                <h3
+                  className="font-bold text-base leading-tight truncate"
+                  style={{ color: 'var(--foreground)' }}
+                >
+                  {trip.name}
+                </h3>
+                <div className="flex items-center gap-1 mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
                   <MapPin size={11} />
                   <span className="text-xs truncate">{trip.destination}</span>
                 </div>
@@ -42,7 +50,7 @@ export default function TripCard({ trip, onDelete }: TripCardProps) {
               </span>
             </div>
 
-            <div className="flex items-center gap-3 text-xs text-gray-400">
+            <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--muted-foreground)' }}>
               <span className="flex items-center gap-1">
                 <Calendar size={11} />
                 {formatShortDate(trip.startDate)} – {formatShortDate(trip.endDate)}
@@ -67,7 +75,8 @@ export default function TripCard({ trip, onDelete }: TripCardProps) {
             e.preventDefault()
             onDelete(trip.id)
           }}
-          className="absolute top-3 right-3 p-1.5 rounded-lg bg-white/90 text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm border border-gray-100"
+          className="absolute top-3 right-3 p-1.5 rounded-lg border transition-all shadow-sm text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-500 hover:bg-red-50"
+          style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
         >
           <Trash2 size={13} />
         </button>

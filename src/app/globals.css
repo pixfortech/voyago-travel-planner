@@ -4,20 +4,35 @@
 
 @layer base {
   /*
-   * Design token foundation (Phase 0).
-   * These CSS variables back the semantic Tailwind color tokens. They are
-   * defined here but not yet applied to any component, so there is no visual
-   * change. Phase 1 introduces a theme toggle that flips `.dark` on <html>.
+   * Claude Design — warm, sophisticated palette (new layout, default).
+   * html[data-layout="classic"] restores the original cool-gray palette.
    */
   :root {
-    --background: #f9fafb; /* gray-50 */
-    --foreground: #111827; /* gray-900 */
+    --background: #F8F5EF;
+    --foreground: #1C1917;
+    --card: #ffffff;
+    --card-foreground: #1C1917;
+    --muted: #F5F5F4;
+    --muted-foreground: #78716C;
+    --border: #E7E5E4;
+    --accent: #14b8a6;
+    --input-bg: #ffffff;
+    --nav-bg: #ffffff;
+    --nav-border: #E7E5E4;
+  }
+
+  html[data-layout="classic"] {
+    --background: #f9fafb;
+    --foreground: #111827;
     --card: #ffffff;
     --card-foreground: #111827;
-    --muted: #f3f4f6; /* gray-100 */
-    --muted-foreground: #6b7280; /* gray-500 */
-    --border: #f3f4f6; /* gray-100 */
-    --accent: #14b8a6; /* primary-500 */
+    --muted: #f3f4f6;
+    --muted-foreground: #6b7280;
+    --border: #f3f4f6;
+    --accent: #14b8a6;
+    --input-bg: #ffffff;
+    --nav-bg: #ffffff;
+    --nav-border: #f3f4f6;
   }
 
   .dark {
@@ -28,7 +43,10 @@
     --muted: #1f2937;
     --muted-foreground: #9ca3af;
     --border: #1f2937;
-    --accent: #2dd4bf; /* primary-400 */
+    --accent: #2dd4bf;
+    --input-bg: #1f2937;
+    --nav-bg: #111827;
+    --nav-border: #1f2937;
   }
 
   html {
@@ -36,7 +54,9 @@
   }
 
   body {
-    @apply text-gray-900 antialiased;
+    background-color: var(--background);
+    color: var(--foreground);
+    @apply antialiased;
   }
 
   * {
@@ -48,4 +68,11 @@
   .safe-area-pb {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+
+  /* Semantic surface utilities using CSS variables */
+  .bg-surface { background-color: var(--background); }
+  .bg-card-surface { background-color: var(--card); }
+  .text-surface-fg { color: var(--foreground); }
+  .text-muted-fg { color: var(--muted-foreground); }
+  .border-surface { border-color: var(--border); }
 }
