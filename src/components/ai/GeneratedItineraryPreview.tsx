@@ -26,6 +26,9 @@ import {
   Clock, Navigation2, Mountain, Cloud, Wind, Backpack,
 } from 'lucide-react'
 import Button from '@/components/ui/Button'
+import Badge from '@/components/ui/Badge'
+import WarningBanner from '@/components/vy/WarningBanner'
+import BudgetMeter from '@/components/vy/BudgetMeter'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { mapPlaceTypesToCategory } from '@/lib/maps/categoryMapping'
 import type {
@@ -300,18 +303,18 @@ function ActivityContextLines({ ctx }: { ctx?: ActivityContext }) {
   if (!hasElevation && !hasWeather && !hasAqi && warnings.length === 0) return null
 
   return (
-    <div className="mt-0.5 space-y-0.5">
+    <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
       {(hasElevation || hasWeather || hasAqi) && (
-        <div className="flex items-center flex-wrap gap-x-2.5 gap-y-0.5 text-[10px] text-gray-500">
+        <div className="flex items-center flex-wrap gap-x-2.5 gap-y-0.5" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
           {hasElevation && (
             <span className="inline-flex items-center gap-1">
-              <Mountain size={9} className="flex-shrink-0 text-stone-400" />
+              <Mountain size={9} style={{ flexShrink: 0, color: 'var(--ink-400)' }} />
               {ctx.elevationMeters!.toLocaleString()} m / {ctx.elevationFeet!.toLocaleString()} ft
             </span>
           )}
           {hasWeather && (
             <span className="inline-flex items-center gap-1">
-              <Cloud size={9} className="flex-shrink-0 text-sky-400" />
+              <Cloud size={9} style={{ flexShrink: 0, color: 'var(--sky-400)' }} />
               {w!.temperatureC != null ? `${w!.temperatureC}°C` : ''}
               {w!.temperatureC != null && w!.condition ? ', ' : ''}
               {w!.condition ?? ''}
@@ -319,8 +322,8 @@ function ActivityContextLines({ ctx }: { ctx?: ActivityContext }) {
             </span>
           )}
           {hasWeather && w!.precipitationProbability != null && w!.precipitationProbability >= 40 && (
-            <span className="inline-flex items-center gap-1 text-sky-600">
-              <Wind size={9} className="flex-shrink-0" />
+            <span className="inline-flex items-center gap-1" style={{ color: 'var(--sky-600)' }}>
+              <Wind size={9} style={{ flexShrink: 0 }} />
               Rain risk: {Math.round(w!.precipitationProbability)}%
             </span>
           )}
@@ -332,8 +335,8 @@ function ActivityContextLines({ ctx }: { ctx?: ActivityContext }) {
         </div>
       )}
       {warnings.map((wn, i) => (
-        <div key={i} className="flex items-start gap-1 text-[10px] text-amber-600">
-          <AlertTriangle size={9} className="flex-shrink-0 mt-0.5" />
+        <div key={i} className="flex items-start gap-1" style={{ fontSize: 10, color: 'var(--sun-600)' }}>
+          <AlertTriangle size={9} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>{wn}</span>
         </div>
       ))}
@@ -345,9 +348,9 @@ function ActivityContextLines({ ctx }: { ctx?: ActivityContext }) {
 function EssentialsBlock({ essentials }: { essentials?: EssentialSuggestion[] }) {
   if (!essentials || essentials.length === 0) return null
   const priorityColor: Record<EssentialSuggestion['priority'], string> = {
-    must_carry: 'text-red-600',
-    recommended: 'text-amber-600',
-    optional: 'text-gray-500',
+    must_carry: 'var(--coral-600)',
+    recommended: 'var(--sun-600)',
+    optional: 'var(--text-muted)',
   }
   const priorityLabel: Record<EssentialSuggestion['priority'], string> = {
     must_carry: 'Must carry',
@@ -355,17 +358,17 @@ function EssentialsBlock({ essentials }: { essentials?: EssentialSuggestion[] })
     optional: 'Optional',
   }
   return (
-    <div className="mb-2 rounded-lg bg-amber-50/60 border border-amber-100 px-2.5 py-1.5">
-      <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-700 mb-1">
+    <div style={{ marginBottom: 10, borderRadius: 'var(--radius-sm)', background: 'var(--sun-50)', border: '1px solid #F4E2A8', padding: '8px 12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: 'var(--sun-600)', marginBottom: 6 }}>
         <Backpack size={11} /> Carry suggestions
       </div>
-      <ul className="space-y-0.5">
+      <ul style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {essentials.map((e, i) => (
-          <li key={i} className="text-[10px] text-gray-600 leading-snug">
-            <span className={`font-semibold ${priorityColor[e.priority]}`}>
+          <li key={i} style={{ fontSize: 11, color: 'var(--text-body)', lineHeight: 1.4 }}>
+            <span style={{ fontWeight: 700, color: priorityColor[e.priority] }}>
               {priorityLabel[e.priority]}:
             </span>{' '}
-            <span className="font-medium text-gray-700">{e.item}</span>
+            <span style={{ fontWeight: 600, color: 'var(--text-strong)' }}>{e.item}</span>
             {' — '}{e.reason}
           </li>
         ))}
@@ -1026,7 +1029,7 @@ export default function GeneratedItineraryPreview({
           setEnrichNote('Google Places is not configured — places shown are AI suggestions and remain unverified.')
           return
         }
-        setEnrichNote(r.done > 0 ? `Auto-verified ${r.done} place${r.done === 1 ? '' : 's'} with Google.` : 'Could not match places automatically — try “Resolve unverified”.')
+        setEnrichNote(r.done > 0 ? `Auto-verified ${r.done} place${r.done === 1 ? '' : 's'} with Google.` : 'Could not match places automatically — try "Resolve unverified".')
         // Skip route optimisation if the effect was already cleaned up.
         // Order: optimise → context (weather/elevation) → timing. Timing runs
         // last so its buffers can use the fetched rain risk (PART 4).
@@ -1209,47 +1212,55 @@ export default function GeneratedItineraryPreview({
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-2xl p-4 sm:p-5 border-2 border-violet-100 shadow-sm">
+      style={{ backgroundColor: 'var(--card)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-soft)', boxShadow: 'var(--shadow-md)', overflow: 'hidden', fontFamily: 'var(--font-sans)' }}>
+      {/* Aurora gradient top band */}
+      <div style={{ height: 5, background: 'var(--grad-aurora)' }} />
+
+      <div style={{ padding: '20px 20px 24px' }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-violet-500" />
-          <h2 className="text-sm font-bold text-gray-900">Generated plan (preview)</h2>
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <div className="flex items-center gap-2.5">
+          <div style={{ width: 36, height: 36, borderRadius: 12, background: 'var(--grad-aurora)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: 'var(--glow-violet)' }}>
+            <i className="fas fa-wand-magic-sparkles" style={{ color: '#fff', fontSize: 15 }} />
+          </div>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 18, color: 'var(--text-strong)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Generated plan</h2>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-            result.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' :
-            result.confidence === 'medium' ? 'bg-sky-100 text-sky-700' : 'bg-gray-100 text-gray-500'
-          }`}>
+          <Badge
+            variant={result.confidence === 'high' ? 'teal' : result.confidence === 'medium' ? 'sky' : 'neutral'}
+            size="sm"
+          >
             {result.confidence} confidence
-          </span>
-          {isMock && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Development Mock</span>}
+          </Badge>
+          {isMock && <Badge variant="sun" size="sm">Dev mock</Badge>}
         </div>
       </div>
 
-      <p className="text-xs text-gray-600 mb-1">{result.tripSummary}</p>
-      <p className="text-[11px] text-amber-600 mb-3 flex items-start gap-1.5">
-        <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" /> {result.approximateLabel}
-      </p>
+      <p style={{ fontSize: 13.5, color: 'var(--text-body)', marginBottom: 10, lineHeight: 1.55 }}>{result.tripSummary}</p>
+      <WarningBanner tone="warn" style={{ marginBottom: 16 }}>
+        {result.approximateLabel}
+      </WarningBanner>
 
       {/* Stay base */}
       {budgetContext?.stayBaseLabel && (
-        <div className="mb-3 flex items-center gap-2 text-[11px] text-gray-600 bg-violet-50/60 border border-violet-100 rounded-xl px-3 py-2">
-          <Home size={13} className="text-violet-500 flex-shrink-0" />
+        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--teal-700)', background: 'var(--teal-50)', border: '1px solid var(--teal-100)', borderRadius: 'var(--radius-md)', padding: '10px 14px' }}>
+          <Home size={13} style={{ color: 'var(--teal-500)', flexShrink: 0 }} />
           <span>Daily routes start &amp; end near <strong>{budgetContext.stayBaseLabel}</strong>.</span>
         </div>
       )}
 
       {/* Auto-run banner */}
       {autoRunning && (
-        <div className="mb-3 flex items-center gap-2 text-[11px] text-sky-700 bg-sky-50 border border-sky-100 rounded-xl px-3 py-2">
-          <Loader2 size={13} className="animate-spin flex-shrink-0" />
-          Verifying places with Google &amp; optimising daily routes…
-        </div>
+        <WarningBanner tone="info" style={{ marginBottom: 12 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Loader2 size={13} className="animate-spin" />
+            Verifying places with Google &amp; optimising daily routes…
+          </span>
+        </WarningBanner>
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
         <SummaryCard icon={<Wallet size={13} />} label="Total est." value={formatCurrency(stats.total, currency)} tone="primary" />
         <SummaryCard icon={<Wallet size={13} />} label="Per head" value={formatCurrency(stats.perHead, currency)} tone="violet" />
         <SummaryCard icon={<ShieldCheck size={13} />} label="Verified" value={`${stats.verified}/${stats.count}`} tone={stats.verified > 0 ? 'emerald' : 'amber'} />
@@ -1258,46 +1269,59 @@ export default function GeneratedItineraryPreview({
 
       {/* Budget split (new-trip generator) */}
       {budgetSplit && (
-        <div className="mb-3 rounded-xl border border-gray-100 bg-gray-50/70 p-3">
-          <p className="text-[11px] font-bold text-gray-600 mb-2 flex items-center gap-1"><Wallet size={12} /> Budget split</p>
-          <div className="space-y-1">
-            {budgetSplit.rows.map((r) => (
-              <div key={r.key} className="flex items-center justify-between text-[11px]">
-                <span className={r.included ? 'text-gray-700' : 'text-gray-400 line-through'}>
-                  {r.label}{!r.included && ' (excluded)'}
-                </span>
-                <span className={r.included ? 'font-semibold text-gray-800' : 'text-gray-400'}>
-                  {r.amount > 0 ? formatCurrency(r.amount, currency) : '—'}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between text-[11px]">
-            <span className="font-bold text-gray-700">Planned (included only)</span>
-            <span className="font-black text-gray-900">{formatCurrency(budgetSplit.includedTotal, currency)}</span>
-          </div>
+        <div style={{ marginBottom: 16 }}>
           {budgetSplit.budget > 0 && (
-            <div className="mt-1 flex items-center justify-between text-[11px]">
-              <span className="text-gray-500">{budgetSplit.overBudget ? 'Over budget by' : 'Remaining buffer'}</span>
-              <span className={`font-semibold ${budgetSplit.overBudget ? 'text-amber-600' : 'text-emerald-600'}`}>
-                {formatCurrency(Math.abs(budgetSplit.remaining), currency)}
-              </span>
-            </div>
+            <BudgetMeter
+              total={budgetSplit.budget}
+              spent={budgetSplit.includedTotal}
+              currency={currency === 'INR' ? '₹' : currency}
+              gradient="aurora"
+              style={{ marginBottom: 12 }}
+            />
           )}
-          <p className="mt-1 text-[10px] text-gray-400">Per head (included) ≈ {formatCurrency(budgetSplit.perHead, currency)}. Excluded categories aren&apos;t compared against the budget.</p>
+          <div style={{ background: 'var(--ink-50)', borderRadius: 'var(--radius-md)', padding: '12px 14px', border: '1px solid var(--border-soft)' }}>
+            <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Budget breakdown</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {budgetSplit.rows.map((r) => (
+                <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                  <span style={{ color: r.included ? 'var(--text-body)' : 'var(--text-muted)', textDecoration: r.included ? undefined : 'line-through' }}>
+                    {r.label}{!r.included && ' (excluded)'}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: r.included ? 'var(--text-strong)' : 'var(--text-muted)', fontSize: 12 }}>
+                    {r.amount > 0 ? formatCurrency(r.amount, currency) : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {!budgetSplit.budget && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-soft)', display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                <span style={{ fontWeight: 700, color: 'var(--text-body)' }}>Planned (included)</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--text-strong)', fontSize: 12 }}>{formatCurrency(budgetSplit.includedTotal, currency)}</span>
+              </div>
+            )}
+            <p style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+              Per head ≈ {formatCurrency(budgetSplit.perHead, currency)}. Excluded categories not counted against budget.
+            </p>
+          </div>
         </div>
       )}
 
       {/* Warnings */}
-      {result.warnings.map((w, i) => (
-        <p key={i} className="text-[11px] text-amber-600 flex items-center gap-1 mb-0.5"><AlertTriangle size={10} /> {w}</p>
-      ))}
+      {result.warnings.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+          {result.warnings.map((w, i) => (
+            <WarningBanner key={i} tone="warn" style={{ padding: '8px 12px' }}>{w}</WarningBanner>
+          ))}
+        </div>
+      )}
       {result.assumptions.length > 0 && (
-        <p className="text-[11px] text-gray-400 mb-2 flex items-start gap-1"><Info size={10} className="mt-0.5" /> {result.assumptions.join(' · ')}</p>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <Info size={12} style={{ marginTop: 2, flexShrink: 0 }} /> {result.assumptions.join(' · ')}
+        </p>
       )}
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 my-3 p-3 bg-gray-50 rounded-xl">
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '14px 0', padding: '12px 14px', background: 'var(--surface-glass)', backdropFilter: 'var(--blur-md)', WebkitBackdropFilter: 'var(--blur-md)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-soft)' }}>
         <Button size="sm" variant="secondary" onClick={() => handleEnrich(false)} disabled={busy || stats.withQuery === 0 || !mapsAvailable}>
           {enriching ? <Loader2 size={13} className="animate-spin" /> : <MapPin size={13} />}
           {enriching ? 'Verifying…' : 'Verify all with Google'}
@@ -1311,60 +1335,75 @@ export default function GeneratedItineraryPreview({
           {optimisingAll ? <Loader2 size={13} className="animate-spin" /> : <Route size={13} />}
           {optimisingAll ? 'Optimising…' : anyStale ? 'Re-optimise routes' : 'Optimise routes'}
         </Button>
-        {!mapsAvailable && <span className="text-[11px] text-gray-400">Google Maps not configured — places stay unverified and routes can&apos;t be computed.</span>}
-        {geocodedCount > 0 && <span className="text-[11px] text-emerald-600 font-semibold">{geocodedCount} place(s) located</span>}
+        {!mapsAvailable && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Google Maps not configured — places stay unverified and routes can&apos;t be computed.</span>}
+        {geocodedCount > 0 && <span style={{ fontSize: 12, color: 'var(--green-600)', fontWeight: 600 }}>{geocodedCount} place(s) located</span>}
       </div>
-      {enrichNote && <p className="text-[11px] text-gray-500 mb-2 flex items-center gap-1"><Info size={11} /> {enrichNote}</p>}
+      {enrichNote && (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Info size={12} /> {enrichNote}
+        </p>
+      )}
       {/* Phase 16F — show time zone only when it differs from India (avoids clutter). */}
       {timeZone?.timeZoneId && timeZone.timeZoneId !== 'Asia/Kolkata' && (
-        <p className="text-[11px] text-gray-500 mb-2 flex items-center gap-1">
-          <Clock size={11} /> Destination time zone: {timeZone.timeZoneName ?? timeZone.timeZoneId}
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Clock size={12} /> Destination time zone: {timeZone.timeZoneName ?? timeZone.timeZoneId}
         </p>
       )}
 
       {/* Day-by-day editable plan */}
-      <div className="space-y-4">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {editDays.map((d) => {
           const dayCost = d.activities.filter((a) => !a._removed).reduce((s, a) => s + (a.estimatedCost || 0), 0)
           const r = dayRoutes[d.date]
           const dayGeocoded = d.activities.filter((a) => !a._removed && a._lat != null).length
           return (
-            <div key={d.date} className="border border-gray-100 rounded-xl p-3">
-              <div className="flex items-center justify-between mb-1">
-                <div>
-                  <p className="text-xs font-bold text-gray-800">Day {d.dayNumber} · {formatDate(d.date)}</p>
-                  {d.theme && <p className="text-[11px] text-gray-400">{d.theme}</p>}
+            <div key={d.date} style={{ backgroundColor: 'var(--card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-soft)', overflow: 'hidden' }}>
+              {/* Day header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: 'var(--ink-50)', borderBottom: '1px solid var(--border-soft)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--grad-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 800, color: '#fff', lineHeight: 1 }}>{d.dayNumber}</span>
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--text-strong)', letterSpacing: '-0.01em' }}>
+                      {formatDate(d.date)}
+                    </div>
+                    {d.theme && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 1 }}>{d.theme}</div>}
+                  </div>
                 </div>
-                <span className="text-[11px] text-gray-500 font-semibold">{formatCurrency(dayCost, currency)}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>{formatCurrency(dayCost, currency)}</span>
               </div>
+              <div style={{ padding: '12px 16px' }}>
 
               {/* Per-day route summary */}
-              <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-2 text-[11px]">
+              <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-2" style={{ fontSize: 11.5 }}>
                 {r ? (
                   <>
-                    <span className={`inline-flex items-center gap-1 font-semibold ${r.stale ? 'text-amber-600' : 'text-sky-700'}`}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 600, color: r.stale ? 'var(--sun-600)' : 'var(--teal-600)' }}>
                       <Route size={11} /> {r.stops} stops · ≈ {r.distanceKm} km{r.durationText !== '—' ? ` · ${r.durationText}` : ''}
                     </span>
-                    <span className="text-[10px] text-gray-400">{r.method === 'road' ? 'road' : 'straight-line'}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.method === 'road' ? 'road' : 'straight-line'}</span>
                     {!r.stale && r.optimiseStatus === 'optimised' && (
-                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-600"><Check size={9} /> Route optimised{r.timingsUpdated ? ' — timings updated' : ''}</span>
+                      <Badge variant="sky" size="sm"><Check size={9} /> Route optimised{r.timingsUpdated ? ' — timings updated' : ''}</Badge>
                     )}
                     {!r.stale && r.optimiseStatus === 'fallback' && (
-                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600"><Info size={9} /> Optimised (straight-line) — timings updated</span>
+                      <Badge variant="sun" size="sm"><Info size={9} /> Optimised (straight-line)</Badge>
                     )}
                     {!r.stale && r.optimiseStatus === 'failed' && (
-                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500"><AlertTriangle size={9} /> Route optimisation unavailable — using original order</span>
+                      <Badge variant="neutral" size="sm"><AlertTriangle size={9} /> Optimisation unavailable</Badge>
                     )}
                     {r.stale && (
                       <button onClick={() => optimiseDay(d.date)} disabled={busy || dayGeocoded < 2}
-                        className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50">
+                        className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full disabled:opacity-50"
+                        style={{ background: 'var(--sun-50)', color: 'var(--sun-600)' }}>
                         {optimisingDay === d.date ? <Loader2 size={9} className="animate-spin" /> : <RotateCcw size={9} />} Re-optimise
                       </button>
                     )}
                   </>
                 ) : dayGeocoded >= 2 && mapsAvailable ? (
                   <button onClick={() => optimiseDay(d.date)} disabled={busy}
-                    className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-600 hover:bg-sky-100 disabled:opacity-50">
+                    className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full disabled:opacity-50"
+                    style={{ background: 'var(--teal-50)', color: 'var(--teal-700)' }}>
                     {optimisingDay === d.date ? <Loader2 size={9} className="animate-spin" /> : <Route size={9} />} Optimise day route
                   </button>
                 ) : null}
@@ -1372,22 +1411,22 @@ export default function GeneratedItineraryPreview({
 
               {/* Phase 16E — day timing summary */}
               {d._timingSummary && (
-                <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-2 text-[11px] text-gray-500">
+                <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-2" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                   <span className="inline-flex items-center gap-1">
-                    <Clock size={11} className="text-violet-400" />
+                    <Clock size={11} style={{ color: 'var(--violet-400)' }} />
                     Activities: {fmtMins(d._timingSummary.activityMins)}
                   </span>
                   {d._timingSummary.travelMins > 0 && (
                     <span>Travel: {fmtMins(d._timingSummary.travelMins)}</span>
                   )}
-                  <span className="font-semibold">Est. end: {d._timingSummary.dayEnd}</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>Est. end: {d._timingSummary.dayEnd}</span>
                   {d._timingSummary.paceWarning && (
-                    <span className="text-amber-600 flex items-center gap-0.5">
+                    <span className="flex items-center gap-0.5" style={{ color: 'var(--sun-600)' }}>
                       <AlertTriangle size={10} /> {d._timingSummary.paceWarning}
                     </span>
                   )}
                   {d._timingSummary.chronoWarning && (
-                    <span className="text-red-600 flex items-center gap-0.5">
+                    <span className="flex items-center gap-0.5" style={{ color: 'var(--coral-600)' }}>
                       <AlertTriangle size={10} /> {d._timingSummary.chronoWarning}
                     </span>
                   )}
@@ -1424,7 +1463,8 @@ export default function GeneratedItineraryPreview({
                     onMove={(toDate) => moveToDay(d.date, act._key, toDate)}
                   />
                 ))}
-                {d.activities.length === 0 && <p className="text-[11px] text-gray-300 py-1">No activities.</p>}
+                {d.activities.length === 0 && <p style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 0' }}>No activities.</p>}
+              </div>
               </div>
             </div>
           )
@@ -1433,36 +1473,39 @@ export default function GeneratedItineraryPreview({
 
       {/* Route + comfort notes */}
       {(result.routeSummary.logic || c.notes.length > 0) && (
-        <div className="mt-3 text-[11px] text-gray-500 space-y-0.5">
-          {result.routeSummary.logic && <p>🧭 {result.routeSummary.logic}</p>}
-          {c.notes.map((n, i) => <p key={i}>• {n}</p>)}
+        <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {result.routeSummary.logic && <p><i className="fas fa-compass" style={{ marginRight: 6 }} />{result.routeSummary.logic}</p>}
+          {c.notes.map((n, i) => <p key={i}>· {n}</p>)}
         </div>
       )}
 
       {hasUnverified && (
-        <p className="mt-3 text-[11px] text-amber-600 flex items-center gap-1.5">
-          <ShieldAlert size={12} /> {stats.unverified} place(s) are unverified AI suggestions.
-          {mapsAvailable ? ' Use “Resolve unverified” to confirm them with Google before applying.' : ' Edit them manually before applying.'}
+        <p style={{ marginTop: 14, fontSize: 12, color: 'var(--sun-600)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ShieldAlert size={13} /> {stats.unverified} place(s) are unverified AI suggestions.
+          {mapsAvailable ? ' Use "Resolve unverified" to confirm them with Google before applying.' : ' Edit them manually before applying.'}
         </p>
       )}
-      {applyNote && <p className="mt-2 text-xs text-emerald-600 flex items-center gap-1.5"><Check size={12} /> {applyNote}</p>}
+      {applyNote && (
+        <p style={{ marginTop: 10, fontSize: 12.5, color: 'var(--green-600)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Check size={13} /> {applyNote}
+        </p>
+      )}
 
-      {/* PART 12A — sanity review banner. Blocks a silent save of an invalid plan. */}
+      {/* PART 12A — sanity review banner. */}
       {validation.needsReview && (
-        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <p className="text-[11px] font-bold text-amber-700 flex items-center gap-1.5 mb-1">
-            <AlertTriangle size={12} /> This itinerary needs review before saving
-          </p>
-          <ul className="space-y-0.5">
-            {validation.issues.slice(0, 5).map((iss, i) => (
-              <li key={i} className="text-[10px] text-amber-700 leading-snug">• {iss.message}</li>
-            ))}
-          </ul>
+        <div style={{ marginTop: 14 }}>
+          <WarningBanner tone="warn" title="This itinerary needs review before saving">
+            <ul style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {validation.issues.slice(0, 5).map((iss, i) => (
+                <li key={i} style={{ fontSize: 12 }}>· {iss.message}</li>
+              ))}
+            </ul>
+          </WarningBanner>
         </div>
       )}
 
       {/* Actions */}
-      <div className="flex flex-wrap gap-2 mt-4">
+      <div className="flex flex-wrap gap-2 mt-5">
         <Button onClick={handleApplyClick} disabled={applying || busy}
           variant={validation.needsReview && confirmSave ? 'secondary' : 'primary'}
           className="flex-1 min-w-[140px]">
@@ -1474,14 +1517,16 @@ export default function GeneratedItineraryPreview({
               : applyLabel}
         </Button>
         <Button variant="secondary" onClick={onRegenerate} disabled={applying || busy}>
-          <Sparkles size={14} /> Regenerate
+          <i className="fas fa-wand-magic-sparkles" style={{ fontSize: 13 }} /> Regenerate
         </Button>
         <Button variant="ghost" onClick={onDiscard} disabled={applying || busy}>Discard</Button>
       </div>
-      <p className="text-[11px] text-gray-400 mt-2">
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.5 }}>
         Past/completed days are protected. Generated activities are saved as planned estimates and marked
         as AI-generated — they never overwrite your confirmed or completed activities.
       </p>
+
+      </div>
     </motion.div>
   )
 }
@@ -1545,43 +1590,40 @@ function SuggestedItemsBlock({
   if (!items.length) return null
   const removed = new Set(removedKeys)
   return (
-    <div className="mt-1.5 space-y-1">
-      <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Suggested items (est. prices)</p>
+    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <p style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>Suggested items (est. prices)</p>
       {items.map((item, idx) => {
         const key = itemKey(item, idx)
         const isRemoved = removed.has(key)
         const badge = vegBadge(item.vegType)
         return (
-          <div key={key} className={`flex items-center gap-1.5 text-[10px] ${isRemoved ? 'opacity-40' : ''}`}>
+          <div key={key} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, fontSize: 10.5, opacity: isRemoved ? 0.45 : 1 }}>
             <button
               type="button"
               onClick={() => onToggleItem(key)}
-              className={`p-0.5 rounded ${isRemoved ? 'text-gray-400 hover:bg-gray-100' : 'text-red-400 hover:bg-red-50'}`}
+              style={{ padding: 3, borderRadius: 5, background: 'transparent', border: 'none', cursor: 'pointer', color: isRemoved ? 'var(--text-muted)' : 'var(--coral-500)' }}
               title={isRemoved ? 'Add back (counts in budget)' : 'Remove (excluded from budget)'}
             >
               {isRemoved ? <RotateCcw size={9} /> : <Trash2 size={9} />}
             </button>
-            <span className={`font-semibold text-gray-700 ${isRemoved ? 'line-through' : ''}`}>{item.name}</span>
-            {badge && <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>}
+            <span style={{ fontWeight: 600, color: 'var(--text-strong)', textDecoration: isRemoved ? 'line-through' : undefined }}>{item.name}</span>
+            {badge && <Badge size="sm" style={{ fontSize: 9, padding: '2px 6px' }} variant={badge.label === 'Veg' || badge.label === 'Vegan' ? 'teal' : 'coral'}>{badge.label}</Badge>}
             {item.popularityHint && item.popularityHint !== 'unknown' && (() => {
               const ph = popularityHintLabel(item.popularityHint)
               return ph ? (
-                <span className="text-[8px] font-semibold px-1 py-0.5 rounded-full bg-violet-50 text-violet-600">{ph}</span>
+                <Badge size="sm" style={{ fontSize: 9, padding: '2px 6px' }} variant="violet">{ph}</Badge>
               ) : null
             })()}
-            <span className="text-gray-500">
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-muted)' }}>
               {formatCurrency(item.estimatedPriceMin, currency)}–{formatCurrency(item.estimatedPriceMax, currency)}/person
             </span>
-            <span
-              className="text-[8px] font-semibold px-1 py-0.5 rounded-full bg-gray-100 text-gray-500"
-              title={item.sourceNote}
-            >
+            <Badge size="sm" style={{ fontSize: 9, padding: '2px 6px' }} variant="neutral" title={item.sourceNote}>
               {itemBasisLabel(item.basis, item.confidence)}
-            </span>
+            </Badge>
           </div>
         )
       })}
-      <p className="text-[9px] text-gray-400">
+      <p style={{ fontSize: 10, color: 'var(--text-muted)' }}>
         Prices are estimates — verify in person. {travellerCount > 1 ? `Per-person × ${travellerCount} travellers.` : ''}
       </p>
     </div>
@@ -1627,52 +1669,54 @@ function ActivityRow({
     : act._locationContext?.city ?? undefined
 
   return (
-    <div className={`rounded-xl border p-2 ${act._removed ? 'opacity-40 border-gray-100 bg-gray-50' : 'border-gray-150 bg-white'}`}>
+    <div style={{ borderRadius: 'var(--radius-md)', border: `1px solid ${act._removed ? 'var(--border-soft)' : 'var(--border-soft)'}`, padding: '10px 12px', backgroundColor: act._removed ? 'var(--ink-50)' : 'var(--card)', opacity: act._removed ? 0.45 : 1 }}>
       <div className="flex items-center gap-2">
         <input
           value={act.startTime ?? ''}
           onChange={(e) => onPatch({ startTime: e.target.value })}
           placeholder="--:--"
-          className="w-14 text-xs font-mono text-gray-500 bg-gray-50 rounded-lg px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
+          className="w-14 focus:outline-none focus:ring-1"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', backgroundColor: 'var(--ink-50)', borderRadius: 8, padding: '6px 8px', border: '1px solid var(--border-soft)', focusRingColor: 'var(--teal-300)' } as React.CSSProperties}
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-1.5 flex-wrap">
             <input
               value={act.title}
               onChange={(e) => onPatch({ title: e.target.value })}
-              className="flex-1 min-w-0 text-sm text-gray-800 bg-transparent focus:outline-none"
+              className="flex-1 min-w-0 focus:outline-none"
+              style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-strong)', backgroundColor: 'transparent' }}
             />
             {/* Part 8: locality shown beside title in collapsed view */}
             {localityLabel && !open && (
-              <span className="text-[9px] text-gray-400 whitespace-nowrap flex items-center gap-0.5">
-                <MapPin size={8} className="flex-shrink-0" /> {localityLabel}
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 3 }}>
+                <MapPin size={8} style={{ flexShrink: 0 }} /> {localityLabel}
               </span>
             )}
           </div>
           {/* Badges */}
-          <div className="flex items-center flex-wrap gap-1 mt-0.5">
-            {act.isBreak && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-500">Break</span>}
+          <div className="flex items-center flex-wrap gap-1 mt-1">
+            {act.isBreak && <Badge variant="orange" size="sm">Break</Badge>}
             {/* PART 12A — a geographically-wrong match must not claim "Verified by Google". */}
-            {v === 'verified' && !suspect && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600"><ShieldCheck size={9} /> Verified by Google</span>}
-            {suspect && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600"><ShieldAlert size={9} /> Verify match — looks wrong</span>}
-            {v === 'unverified' && !suspect && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600"><ShieldAlert size={9} /> Unverified</span>}
-            {act._autoCategory && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-500">Auto-category</span>}
-            {act._placeRating != null && <span className="text-[9px] text-gray-400">★ {act._placeRating}{act._placeUserRatings ? ` (${act._placeUserRatings})` : ''}</span>}
-            {/* Part 7: meal-time mismatch warning badge */}
-            {act._mealTimeIssue && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-600" title={act._mealTimeIssue}><AlertTriangle size={8} /> Meal time adjusted</span>}
-            {/* Terminal-anchor hotfix: onboard/packed meal + terminal departure badges */}
-            {act._onboardMeal && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">Onboard / packed</span>}
-            {act._terminalDeparture && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700">Departure — trip ends here</span>}
+            {v === 'verified' && !suspect && <Badge variant="teal" size="sm"><ShieldCheck size={9} /> Verified</Badge>}
+            {suspect && <Badge variant="coral" size="sm"><ShieldAlert size={9} /> Verify match</Badge>}
+            {v === 'unverified' && !suspect && <Badge variant="sun" size="sm"><ShieldAlert size={9} /> Unverified</Badge>}
+            {act._autoCategory && <Badge variant="violet" size="sm">Auto-category</Badge>}
+            {act._placeRating != null && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>★ {act._placeRating}{act._placeUserRatings ? ` (${act._placeUserRatings})` : ''}</span>}
+            {/* Part 7: meal-time mismatch */}
+            {act._mealTimeIssue && <Badge variant="sun" size="sm"><AlertTriangle size={8} /> Meal time adjusted</Badge>}
+            {/* Terminal-anchor hotfix */}
+            {act._onboardMeal && <Badge variant="sky" size="sm">Onboard / packed</Badge>}
+            {act._terminalDeparture && <Badge variant="violet" size="sm"><i className="fas fa-train" style={{ fontSize: 9 }} /> Departure</Badge>}
           </div>
           {/* Phase 16D — restaurant suggestion for food breaks */}
           {act.restaurantSuggestion && act.category === 'food' && (
             <>
-              <div className="mt-1 text-[10px] text-emerald-700 flex items-center gap-1 flex-wrap">
-                <ShieldCheck size={9} className="flex-shrink-0" />
-                <span className="font-semibold">{act.restaurantSuggestion.name}</span>
-                {act.restaurantSuggestion.rating != null && <span className="text-gray-400">★{act.restaurantSuggestion.rating}</span>}
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--green-700)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
+                <ShieldCheck size={9} style={{ flexShrink: 0 }} />
+                <span style={{ fontWeight: 600 }}>{act.restaurantSuggestion.name}</span>
+                {act.restaurantSuggestion.rating != null && <span style={{ color: 'var(--text-muted)' }}>★{act.restaurantSuggestion.rating}</span>}
                 {act.estimatedSpendRange && (
-                  <span className="text-gray-500">
+                  <span style={{ color: 'var(--text-muted)' }}>
                     · ≈{formatCurrency(act.estimatedSpendRange.perPersonMin, currency)}–{formatCurrency(act.estimatedSpendRange.perPersonMax, currency)}/person
                     {act.spendConfidence === 'high' ? '' : ' (est.)'}
                   </span>
@@ -1683,7 +1727,7 @@ function ActivityRow({
                   href={act.menuSourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-0.5 inline-block text-[9px] text-sky-600 hover:underline"
+                  style={{ marginTop: 3, display: 'inline-block', fontSize: 10, color: 'var(--teal-600)' }}
                   title="Opens the restaurant's official website in a new tab"
                 >
                   Menu/website available — prices still shown as estimates unless parsed confidently.
@@ -1719,45 +1763,43 @@ function ActivityRow({
               )}
             </>
           )}
-          {/* PART 5 — terminal departure card: boarding/buffer + departure time,
-              never a "X min stay" or a city "Next" route. */}
+          {/* PART 5 — terminal departure card */}
           {isTerminal ? (
-            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-indigo-600 flex-wrap font-semibold">
-              <Navigation2 size={9} className="flex-shrink-0" />
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4, fontSize: 11, color: 'var(--violet-600)', fontWeight: 600 }}>
+              <Navigation2 size={9} style={{ flexShrink: 0 }} />
               <span>Station buffer / boarding</span>
               {departTime && (
                 <>
-                  <span className="text-gray-300">·</span>
+                  <span style={{ color: 'var(--border-soft)' }}>·</span>
                   <span>Depart by {departWord}{departTime ? ` at ${departTime}` : ''}</span>
                 </>
               )}
-              {/* Only an onboard/arrival item may follow a departure. */}
               {nextIsTravelContext && nextActivityTitle && (
-                <span className="text-indigo-400 font-normal">→ {nextActivityTitle}</span>
+                <span style={{ color: 'var(--violet-400)', fontWeight: 400 }}>→ {nextActivityTitle}</span>
               )}
             </div>
           ) : (
             <>
               {/* Phase 16E — planned timing (collapsed) */}
               {act._plannedStart && act._durationMins != null && act._durationMins > 0 && (
-                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400">
-                  <Clock size={9} className="flex-shrink-0" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                  <Clock size={9} style={{ flexShrink: 0 }} />
                   <span>{act._plannedStart} – {act._plannedEnd}</span>
-                  <span className="text-gray-300">·</span>
-                  <span>{fmtMins(act._durationMins)} stay</span>
+                  <span style={{ color: 'var(--border-soft)' }}>·</span>
+                  <span style={{ fontFamily: 'var(--font-sans)' }}>{fmtMins(act._durationMins)} stay</span>
                 </div>
               )}
               {act._travelToNextMins != null && nextActivityTitle && (
-                <div className="flex items-center gap-1 mt-0.5 text-[10px] text-sky-600 flex-wrap">
-                  <Navigation2 size={9} className="flex-shrink-0" />
+                <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginTop: 4, fontSize: 11, color: 'var(--teal-600)' }}>
+                  <Navigation2 size={9} style={{ flexShrink: 0 }} />
                   <span>
                     Next: {act._travelToNextDistText ?? fmtMins(act._travelToNextMins)}
                     {act._travelToNextDistKm ? ` / ${act._travelToNextDistKm}` : ''}
                     {` to ${nextActivityTitle}`}
                   </span>
-                  {act._travelRouteSource === 'estimate' && <span className="text-gray-400">(est.)</span>}
+                  {act._travelRouteSource === 'estimate' && <span style={{ color: 'var(--text-muted)' }}>(est.)</span>}
                   {act._travelBufferMins != null && act._travelBufferMins > 0 && (
-                    <span className="text-gray-400" title={act._travelBufferNote}>
+                    <span style={{ color: 'var(--text-muted)' }} title={act._travelBufferNote}>
                       incl. +{act._travelBufferMins} min buffer
                     </span>
                   )}
@@ -1772,69 +1814,73 @@ function ActivityRow({
           type="number" min="0"
           value={act.estimatedCost ?? 0}
           onChange={(e) => onPatch({ estimatedCost: Number(e.target.value) || 0 })}
-          className="w-16 text-xs text-gray-500 bg-gray-50 rounded-lg px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300 self-start"
+          className="focus:outline-none focus:ring-1"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', backgroundColor: 'var(--ink-50)', borderRadius: 8, padding: '6px 8px', border: '1px solid var(--border-soft)', width: 64, alignSelf: 'flex-start' }}
         />
-        <button onClick={() => setOpen((vv) => !vv)} className="text-gray-400 hover:bg-gray-100 rounded-lg p-1 self-start" title={open ? 'Hide details' : 'Show details'}>
+        <button onClick={() => setOpen((vv) => !vv)} style={{ color: 'var(--text-muted)', borderRadius: 8, padding: 6, background: 'transparent', border: 'none', cursor: 'pointer', alignSelf: 'flex-start' }} title={open ? 'Hide details' : 'Show details'}>
           <ArrowRightLeft size={13} />
         </button>
         <button onClick={onToggleRemove}
-          className={`p-1 rounded-lg self-start ${act._removed ? 'text-gray-400 hover:bg-gray-100' : 'text-red-400 hover:bg-red-50'}`}
+          style={{ padding: 6, borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', alignSelf: 'flex-start', color: act._removed ? 'var(--text-muted)' : 'var(--coral-500)' }}
           title={act._removed ? 'Restore' : 'Remove'}>
           {act._removed ? <RotateCcw size={13} /> : <Trash2 size={13} />}
         </button>
       </div>
 
       {open && (
-        <div className="mt-2 pt-2 border-t border-gray-100 grid sm:grid-cols-2 gap-2">
+        <div className="mt-2 pt-2 border-t grid sm:grid-cols-2 gap-2" style={{ borderColor: 'var(--border-soft)' }}>
           {/* Part 8: full locality display in expanded */}
           {localityLabel && (
-            <p className="text-[11px] text-gray-500 sm:col-span-2 flex items-center gap-1">
-              <MapPin size={11} className="text-violet-400 flex-shrink-0" />
+            <p className="sm:col-span-2 flex items-center gap-1" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              <MapPin size={11} style={{ color: 'var(--violet-400)', flexShrink: 0 }} />
               {localityLabel}
             </p>
           )}
           {/* Part 7: meal-time mismatch detail */}
           {act._mealTimeIssue && (
-            <p className="text-[11px] text-orange-600 sm:col-span-2 flex items-start gap-1">
-              <AlertTriangle size={11} className="flex-shrink-0 mt-0.5" /> {act._mealTimeIssue}
+            <p className="sm:col-span-2 flex items-start gap-1" style={{ fontSize: 12, color: 'var(--sun-600)' }}>
+              <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 2 }} /> {act._mealTimeIssue}
             </p>
           )}
-          <label className="text-[11px] text-gray-500">
+          <label style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
             Category
             <select
               value={act.category}
               onChange={(e) => onPatch({ category: e.target.value as ActivityCategory, _autoCategory: false })}
-              className="mt-0.5 w-full text-xs bg-gray-50 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
+              className="mt-0.5 w-full focus:outline-none focus:ring-1"
+              style={{ fontSize: 12.5, backgroundColor: 'var(--ink-50)', borderRadius: 8, padding: '6px 10px', border: '1px solid var(--border-soft)', display: 'block' }}
             >
               {CATEGORIES.map((cc) => <option key={cc} value={cc}>{cc}</option>)}
             </select>
           </label>
-          <label className="text-[11px] text-gray-500">
+          <label style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
             Move to day
             <select
               value={dayDate}
               onChange={(e) => onMove(e.target.value)}
-              className="mt-0.5 w-full text-xs bg-gray-50 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
+              className="mt-0.5 w-full focus:outline-none focus:ring-1"
+              style={{ fontSize: 12.5, backgroundColor: 'var(--ink-50)', borderRadius: 8, padding: '6px 10px', border: '1px solid var(--border-soft)', display: 'block' }}
             >
               {days.map((d) => <option key={d.date} value={d.date}>Day {d.dayNumber} ({formatDate(d.date)})</option>)}
             </select>
           </label>
-          <label className="text-[11px] text-gray-500 sm:col-span-2">
+          <label className="sm:col-span-2" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
             Location
             <input
               value={act.locationName ?? ''}
               onChange={(e) => onPatch({ locationName: e.target.value })}
-              className="mt-0.5 w-full text-xs bg-gray-50 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
+              className="mt-0.5 w-full focus:outline-none focus:ring-1"
+              style={{ fontSize: 12.5, backgroundColor: 'var(--ink-50)', borderRadius: 8, padding: '6px 10px', border: '1px solid var(--border-soft)', display: 'block' }}
               placeholder="Place / area"
             />
           </label>
-          {act._placeAddress && <p className="text-[11px] text-gray-400 sm:col-span-2">📍 {act._placeAddress}</p>}
-          {act.suggestedPlaceSearchQuery && <p className="text-[11px] text-gray-400 sm:col-span-2">🔎 {act.suggestedPlaceSearchQuery}</p>}
-          {act.timeToSpend && <p className="text-[11px] text-gray-400 sm:col-span-2">⏳ Suggested time: {act.timeToSpend}</p>}
-          {act.whyRecommended && <p className="text-[11px] text-gray-400 sm:col-span-2">💡 {act.whyRecommended}</p>}
-          {act.foodInsightNotes && <p className="text-[11px] text-gray-400 sm:col-span-2">🍽 {act.foodInsightNotes}</p>}
-          {act.routeNotes && <p className="text-[11px] text-gray-400 sm:col-span-2">🧭 {act.routeNotes}</p>}
-          {act.estimatedCostPerPerson != null && <p className="text-[11px] text-gray-400 sm:col-span-2">Per head ≈ {formatCurrency(act.estimatedCostPerPerson, currency)}</p>}
+          {act._placeAddress && <p className="sm:col-span-2" style={{ fontSize: 11, color: 'var(--text-muted)' }}><MapPin size={10} style={{ display: 'inline', marginRight: 4 }} />{act._placeAddress}</p>}
+          {act.suggestedPlaceSearchQuery && <p className="sm:col-span-2" style={{ fontSize: 11, color: 'var(--text-muted)' }}><i className="fas fa-magnifying-glass" style={{ marginRight: 4, fontSize: 9 }} />{act.suggestedPlaceSearchQuery}</p>}
+          {act.timeToSpend && <p className="sm:col-span-2" style={{ fontSize: 11, color: 'var(--text-muted)' }}><Clock size={10} style={{ display: 'inline', marginRight: 4 }} />Suggested time: {act.timeToSpend}</p>}
+          {act.whyRecommended && <p className="sm:col-span-2" style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}><i className="fas fa-lightbulb" style={{ marginRight: 4, fontSize: 9, color: 'var(--sun-500)' }} />{act.whyRecommended}</p>}
+          {act.foodInsightNotes && <p className="sm:col-span-2" style={{ fontSize: 11, color: 'var(--text-muted)' }}><i className="fas fa-utensils" style={{ marginRight: 4, fontSize: 9 }} />{act.foodInsightNotes}</p>}
+          {act.routeNotes && <p className="sm:col-span-2" style={{ fontSize: 11, color: 'var(--text-muted)' }}><i className="fas fa-compass" style={{ marginRight: 4, fontSize: 9 }} />{act.routeNotes}</p>}
+          {act.estimatedCostPerPerson != null && <p className="sm:col-span-2" style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Per head ≈ {formatCurrency(act.estimatedCostPerPerson, currency)}</p>}
         </div>
       )}
     </div>
@@ -1842,16 +1888,20 @@ function ActivityRow({
 }
 
 function SummaryCard({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone: 'primary' | 'violet' | 'emerald' | 'amber' }) {
-  const cls = {
-    primary: 'bg-primary-50 text-primary-600',
-    violet: 'bg-violet-50 text-violet-600',
-    emerald: 'bg-emerald-50 text-emerald-600',
-    amber: 'bg-amber-50 text-amber-600',
-  }[tone]
+  const toneStyle: Record<string, { bg: string; fg: string }> = {
+    primary: { bg: 'var(--teal-50)', fg: 'var(--teal-700)' },
+    violet:  { bg: 'var(--violet-50)', fg: 'var(--violet-700)' },
+    emerald: { bg: 'var(--green-100)', fg: 'var(--green-600)' },
+    amber:   { bg: 'var(--sun-50)', fg: 'var(--sun-600)' },
+  }
+  const t = toneStyle[tone] ?? toneStyle.primary
   return (
-    <div className="bg-white rounded-xl p-2.5 border border-gray-100">
-      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md mb-1 ${cls}`}>{icon} {label}</span>
-      <p className="text-sm font-black text-gray-900 leading-none truncate capitalize">{value}</p>
+    <div style={{ backgroundColor: 'var(--card)', borderRadius: 'var(--radius-md)', padding: '12px 14px', border: '1px solid var(--border-soft)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <span style={{ background: t.bg, color: t.fg, width: 26, height: 26, borderRadius: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>{icon}</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>{label}</span>
+      </div>
+      <p style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 800, color: 'var(--text-strong)', lineHeight: 1, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</p>
     </div>
   )
 }
