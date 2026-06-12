@@ -13,11 +13,14 @@ import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatTile } from '@/components/vy'
+import VyDashboard from '@/components/dashboard/VyDashboard'
+import { useLayout } from '@/context/LayoutContext'
 import type { Trip } from '@/types'
 
 export default function DashboardPage() {
   const router = useRouter()
   const { user, profile, loading } = useApp()
+  const { isNewLayout } = useLayout()
   const [trips, setTrips] = useState<Trip[]>([])
   const [tripsLoading, setTripsLoading] = useState(true)
 
@@ -58,7 +61,9 @@ export default function DashboardPage() {
     >
       <ProfileSetup open={!!showProfileSetup} />
 
-      {tripsLoading ? (
+      {isNewLayout ? (
+        <VyDashboard trips={trips} loading={tripsLoading} onDelete={handleDelete} />
+      ) : tripsLoading ? (
         <>
           <div className="grid grid-cols-3 gap-3 mb-6">
             {[1, 2, 3].map((i) => (

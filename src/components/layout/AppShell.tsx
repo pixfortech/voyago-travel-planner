@@ -5,7 +5,9 @@ import { cn } from '@/lib/utils'
 import Header from './Header'
 import BottomNav from './BottomNav'
 import TripSubNav from './TripSubNav'
+import VyWorkspaceShell from './VyWorkspaceShell'
 import { useApp } from '@/context/AppContext'
+import { useLayout } from '@/context/LayoutContext'
 import FirebaseSetupBanner from '@/components/ui/FirebaseSetupBanner'
 
 interface AppShellProps {
@@ -29,6 +31,18 @@ export default function AppShell({
   wide,
 }: AppShellProps) {
   const { authSetupError } = useApp()
+  const { isNewLayout } = useLayout()
+
+  const body = authSetupError ? <FirebaseSetupBanner error={authSetupError} /> : children
+
+  if (isNewLayout) {
+    return (
+      <VyWorkspaceShell title={title} back={back} actions={actions} tripId={tripId} focus={hideNav}>
+        {tripId && !hideNav && <TripSubNav tripId={tripId} />}
+        {body}
+      </VyWorkspaceShell>
+    )
+  }
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--background)' }}>

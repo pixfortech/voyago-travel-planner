@@ -308,6 +308,25 @@
     to   { opacity: 1; transform: translateX(-50%) translateY(0); }
   }
 
+  /* Gentle floating motif for the personalised loading screen */
+  @keyframes vyFloat {
+    0%, 100% { transform: translateY(0) rotate(var(--vy-rot, 0deg)); }
+    50%      { transform: translateY(-12px) rotate(var(--vy-rot, 0deg)); }
+  }
+  .vy-float { animation: vyFloat var(--vy-dur, 4s) var(--ease-in-out) infinite; }
+
+  @keyframes vyFadeUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .vy-fade-up { animation: vyFadeUp 0.5s var(--ease-out) both; }
+
+  /* Animated dotted route flow for the loader */
+  @keyframes vyDash { to { stroke-dashoffset: -120; } }
+
+  /* Skeleton shimmer */
+  @keyframes vyPulseFade { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
   /* Surface helpers */
   .bg-surface { background-color: var(--background); }
   .bg-card-surface { background-color: var(--card); }

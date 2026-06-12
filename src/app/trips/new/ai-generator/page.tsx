@@ -17,6 +17,9 @@ import GeneratingState from '@/components/vy/GeneratingState'
 import GeneratedItineraryPreview, {
   type EditableGeneratedDay, type PreviewBudgetContext,
 } from '@/components/ai/GeneratedItineraryPreview'
+import VyBriefForm from '@/components/ai/VyBriefForm'
+import { type TripBrief } from '@/components/ai/briefTypes'
+import { useLayout } from '@/context/LayoutContext'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import { getDayCount } from '@/lib/utils'
 import { categoryToActivityType } from '@/lib/maps/categoryMapping'
@@ -49,55 +52,6 @@ type Stage =
   | 'creating'
 
 type InputMode = 'full-prompt' | 'guided' | 'smart-form'
-
-interface TripBrief {
-  tripName: string
-  destination: string                  // canonical free-text (kept for back-compat)
-  // Phase 16C — structured destination + nearest station/airport
-  destinationStructured?: StructuredDestination
-  destinationSource: 'dataset' | 'custom'
-  /** Nearest station to the destination — used as geographic context in AI prompt. */
-  railwayStation?: RailwayStationRef
-  /** Nearest airport to the destination — used as geographic context in AI prompt. */
-  airport?: AirportRef
-  origin: string
-  startDate: string
-  endDate: string
-  budget: number
-  currency: string
-  travellerCount: number
-  tripType: TripType
-  composition: { total: number; couples?: number; adults?: number; kids?: number; seniors?: number; notes?: string }
-  preferences: TripGenerationPreferences
-  // Phase 16B — single unified stay flow (replaces stayBaseMode/stayBase/stay)
-  accommodation: AccommodationDraft
-  budgetIncluded: BudgetInclusion
-  transport: PlannedTransport
-  // Hotfix transport improvements — structured from/to + round trip + train validation
-  /** One-way or round-trip journey. */
-  transportTravelType: 'one_way' | 'round_trip'
-  // Train from/to structured selectors
-  fromStation?: RailwayStationRef
-  toStation?: RailwayStationRef
-  // Train number/name (optional — user may just enter a number without selecting from seed)
-  trainNumber?: string
-  trainName?: string
-  /** Route mismatch warning from local seed validation. Advisory only. */
-  trainRouteWarning?: string
-  // Flight from/to structured selectors
-  fromAirport?: AirportRef
-  toAirport?: AirportRef
-  // Bus/car/other: free-text city names (reuses transport.origin/destination)
-  // Return leg (round trip)
-  returnFromStation?: RailwayStationRef
-  returnToStation?: RailwayStationRef
-  returnFromAirport?: AirportRef
-  returnToAirport?: AirportRef
-  returnFromCity?: string
-  returnToCity?: string
-  returnTrainNumber?: string
-  returnTrainName?: string
-}
 
 const BUDGET_CATS: { key: BudgetCategoryKey; label: string }[] = [
   { key: 'stay', label: 'Stay / hotel' },
@@ -662,6 +616,7 @@ export default function NewTripAiGeneratorPage() {
   const router = useRouter()
   const { user, loading } = useApp()
   const { status: mapsStatus } = useMapsStatus()
+  const { isNewLayout } = useLayout()
 
   const [stage, setStage] = useState<Stage>('mode-select')
   const [inputMode, setInputMode] = useState<InputMode>('full-prompt')
@@ -730,6 +685,17 @@ export default function NewTripAiGeneratorPage() {
   }
   function clearDestination() {
     setBrief((p) => ({ ...p, destination: '', destinationStructured: undefined, destinationSource: 'custom' }))
+  }
+  // New-layout brief form: "From" city → free-text origin ("City, State").
+  function selectOriginCity(c: IndiaCity) {
+    setBrief((p) => ({ ...p, origin: `${c.city}, ${c.state}` }))
+  }
+  function clearOrigin() {
+    setBrief((p) => ({ ...p, origin: '' }))
+  }
+  // Generic shallow patch used by the new-layout brief form.
+  function patchBrief(patch: Partial<TripBrief>) {
+    setBrief((p) => ({ ...p, ...patch }))
   }
   function selectStation(s: IndiaRailwayStation) {
     setBrief((p) => ({ ...p, railwayStation: { ...s, source: 'dataset' } }))
@@ -931,7 +897,8 @@ export default function NewTripAiGeneratorPage() {
     if (brief.travellerCount < 1) errors.travellerCount = 'At least 1 traveller required'
     if (Object.keys(errors).length > 0) {
       setBriefErrors(errors)
-      setStage('review-brief')
+      // New layout shows errors inline on the brief form; classic jumps to review.
+      if (!isNewLayout) setStage('review-brief')
       return
     }
     setBriefErrors({})
@@ -1393,8 +1360,28 @@ export default function NewTripAiGeneratorPage() {
     <AppShell title="Create Trip with AI" back="/trips/new" hideNav>
       <div className="space-y-5 pb-6">
 
+        {/* ── New-layout brief form (Claude Design create-trip) ───────── */}
+        {isNewLayout && (stage === 'mode-select' || stage === 'smart-form') && (
+          <VyBriefForm
+            brief={brief}
+            briefErrors={briefErrors}
+            onSelectCity={selectCity}
+            onCustomDestination={setCustomDestination}
+            onClearDestination={clearDestination}
+            onSetOrigin={selectOriginCity}
+            onClearOrigin={clearOrigin}
+            onPatch={patchBrief}
+            onSetPrefs={setPrefs}
+            onSetCount={setCount}
+            onGenerate={handleGenerate}
+            onAdvanced={() => setStage('review-brief')}
+            onPromptMode={() => { setInputMode('full-prompt'); setStage('full-prompt') }}
+            onGuidedMode={() => { setInputMode('guided'); setGuidedStep(0); setStage('guided') }}
+          />
+        )}
+
         {/* ── Mode Select ─────────────────────────────────────────────── */}
-        {stage === 'mode-select' && (
+        {!isNewLayout && stage === 'mode-select' && (
           <div className="space-y-4">
             <div>
               <h2 className="text-xl font-black text-gray-900 mb-1">Plan with AI</h2>
@@ -1668,7 +1655,7 @@ export default function NewTripAiGeneratorPage() {
         )}
 
         {/* ── Smart Form ───────────────────────────────────────────────── */}
-        {stage === 'smart-form' && (
+        {!isNewLayout && stage === 'smart-form' && (
           <div className="space-y-5">
             <div>
               <h2 className="text-xl font-black text-gray-900 mb-1">Trip details</h2>
@@ -2258,6 +2245,8 @@ export default function NewTripAiGeneratorPage() {
           ) : (
             <GeneratingState
               title="Planning your trip"
+              city={brief.destinationStructured?.city ?? brief.destination ?? null}
+              state={brief.destinationStructured?.state ?? null}
               lines={[
                 'Reading your brief…',
                 brief.destination ? `Scouting ${brief.destination}…` : 'Scouting beaches, food & sights…',
