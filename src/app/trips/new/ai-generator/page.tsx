@@ -13,6 +13,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import PlacePicker, { type SelectedPlace } from '@/components/maps/PlacePicker'
 import SearchableSelect from '@/components/ui/SearchableSelect'
+import GeneratingState from '@/components/vy/GeneratingState'
 import GeneratedItineraryPreview, {
   type EditableGeneratedDay, type PreviewBudgetContext,
 } from '@/components/ai/GeneratedItineraryPreview'
@@ -2247,24 +2248,25 @@ export default function NewTripAiGeneratorPage() {
           </div>
         )}
 
-        {/* ── Generating Spinner ───────────────────────────────────────── */}
+        {/* ── Generating state ─────────────────────────────────────────── */}
         {stage === 'generating' && (
-          <div className="flex flex-col items-center gap-4 py-16">
-            <div className="w-14 h-14 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/20">
-              <Loader2 size={28} className="text-white animate-spin" />
-            </div>
-            <div className="text-center">
-              <p className="text-base font-bold text-gray-900">
-                {enrichingFood ? 'Finding restaurant suggestions…' : 'Generating your itinerary…'}
-              </p>
-              <p className="text-sm text-gray-500 mt-1">
-                {enrichingFood
-                  ? 'Matching food breaks with Google Places'
-                  : `Creating a ${brief.startDate && brief.endDate ? getDayCount(brief.startDate, brief.endDate) : '?'}-day plan${brief.destination ? ` for ${brief.destination}` : ''}`}
-              </p>
-            </div>
-            <p className="text-xs text-gray-400">This usually takes 10–25 seconds</p>
-          </div>
+          enrichingFood ? (
+            <GeneratingState
+              title="Finding food spots"
+              subtitle="Matching meal breaks with Google Places…"
+            />
+          ) : (
+            <GeneratingState
+              title="Planning your trip"
+              lines={[
+                'Reading your brief…',
+                brief.destination ? `Scouting ${brief.destination}…` : 'Scouting beaches, food & sights…',
+                'Plotting the smartest route…',
+                'Pricing stays and transport…',
+                'Packing your itinerary…',
+              ]}
+            />
+          )
         )}
 
         {/* ── Preview ──────────────────────────────────────────────────── */}
