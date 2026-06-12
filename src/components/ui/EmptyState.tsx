@@ -19,12 +19,14 @@ export default function EmptyState({ icon, title, description, action, className
       animate={{ opacity: 1, y: 0 }}
       className={cn('flex flex-col items-center justify-center text-center py-12 px-6', className)}
     >
-      <div className="w-20 h-20 bg-gradient-to-br from-primary-50 to-teal-50 rounded-3xl flex items-center justify-center mb-5">
+      <div className="w-20 h-20 bg-gradient-to-br from-primary-50 to-teal-50 rounded-2xl flex items-center justify-center mb-5 border border-primary-100">
         <div className="text-primary-400">{icon}</div>
       </div>
-      <h3 className="font-bold text-gray-900 text-lg mb-2">{title}</h3>
+      <h3 className="font-bold text-lg mb-2" style={{ color: 'var(--foreground)' }}>{title}</h3>
       {description && (
-        <p className="text-gray-400 text-sm leading-relaxed mb-6 max-w-xs">{description}</p>
+        <p className="text-sm leading-relaxed mb-6 max-w-xs" style={{ color: 'var(--muted-foreground)' }}>
+          {description}
+        </p>
       )}
       {action}
     </motion.div>

@@ -124,20 +124,23 @@ export default function ProfileMenu() {
         <AvatarCircle {...avatarProps} size="sm" />
       </button>
 
-      {/* Dropdown — rendered in a portal-like absolute position above all content */}
+      {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl shadow-gray-200/60 border border-gray-100 overflow-hidden z-[100]">
+        <div
+          className="absolute right-0 top-full mt-2 w-64 rounded-2xl shadow-xl overflow-hidden z-[100] border"
+          style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
+        >
           {/* Identity section */}
           <div className="p-4 flex items-center gap-3">
             <AvatarCircle {...avatarProps} size="lg" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-gray-900 truncate">
+              <p className="text-sm font-bold truncate" style={{ color: 'var(--foreground)' }}>
                 {isAnonymous ? 'Guest' : displayName}
               </p>
               {!isAnonymous && email ? (
-                <p className="text-xs text-gray-500 truncate">{email}</p>
+                <p className="text-xs truncate" style={{ color: 'var(--muted-foreground)' }}>{email}</p>
               ) : (
-                <p className="text-xs text-gray-400">Anonymous session</p>
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Anonymous session</p>
               )}
               {!isAnonymous && providerId && (
                 <span
@@ -153,7 +156,7 @@ export default function ProfileMenu() {
             </div>
           </div>
 
-          <div className="border-t border-gray-50" />
+          <div className="border-t" style={{ borderColor: 'var(--border)' }} />
 
           {/* Actions */}
           {isAnonymous ? (

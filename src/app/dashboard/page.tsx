@@ -36,14 +36,13 @@ export default function DashboardPage() {
 
   const showProfileSetup = !loading && user && !profile
 
-  // Aggregate stats shown when trips are loaded
   const totalDays = trips.reduce((s, t) => s + getDayCount(t.startDate, t.endDate), 0)
   const uniqueDests = new Set(trips.map((t) => t.destination)).size
 
   const stats = [
-    { label: 'Total trips', value: trips.length, icon: <Plane size={16} /> },
-    { label: 'Days planned', value: totalDays, icon: <Calendar size={16} /> },
-    { label: 'Destinations', value: uniqueDests, icon: <MapPin size={16} /> },
+    { label: 'Total trips', value: trips.length, icon: <Plane size={15} /> },
+    { label: 'Days planned', value: totalDays, icon: <Calendar size={15} /> },
+    { label: 'Destinations', value: uniqueDests, icon: <MapPin size={15} /> },
   ]
 
   return (
@@ -51,7 +50,7 @@ export default function DashboardPage() {
       title={profile ? `Hi, ${profile.name} 👋` : 'My Trips'}
       actions={
         <Button size="sm" onClick={() => router.push('/trips/new')}>
-          <Plus size={16} /> New Trip
+          <Plus size={15} /> New Trip
         </Button>
       }
       wide
@@ -60,17 +59,19 @@ export default function DashboardPage() {
 
       {tripsLoading ? (
         <>
-          {/* Stats skeletons */}
           <div className="grid grid-cols-3 gap-3 mb-6">
             {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-20 rounded-2xl" />
+              <Skeleton key={i} className="h-20 rounded-xl" />
             ))}
           </div>
-          {/* Card skeletons */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
-                <Skeleton className="h-2.5 rounded-none" />
+              <div
+                key={i}
+                className="rounded-xl overflow-hidden border"
+                style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
+              >
+                <Skeleton className="h-1.5 rounded-none" />
                 <div className="p-4 space-y-2.5">
                   <Skeleton className="h-4 w-2/3" />
                   <Skeleton className="h-3 w-1/3" />
@@ -82,16 +83,16 @@ export default function DashboardPage() {
         </>
       ) : trips.length === 0 ? (
         <EmptyState
-          icon={<Plane size={32} />}
+          icon={<Plane size={30} />}
           title="No trips yet"
           description="Create your first trip and start building your perfect itinerary."
           action={
             <div className="flex flex-col gap-2 w-full max-w-xs">
               <Button onClick={() => router.push('/trips/new/ai-generator')} size="lg" className="w-full">
-                <Sparkles size={18} /> Create with AI
+                <Sparkles size={17} /> Create with AI
               </Button>
               <Button variant="secondary" onClick={() => router.push('/trips/new')} size="lg" className="w-full">
-                <Plus size={18} /> Create manually
+                <Plus size={17} /> Create manually
               </Button>
             </div>
           }
@@ -103,48 +104,68 @@ export default function DashboardPage() {
             {stats.map((s) => (
               <div
                 key={s.label}
-                className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm flex flex-col"
+                className="rounded-xl p-4 border flex flex-col"
+                style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
               >
-                <div className="flex items-center gap-1.5 text-primary-500 mb-2 text-xs font-semibold">
+                <div className="flex items-center gap-1.5 text-primary-500 mb-2">
                   {s.icon}
-                  <span className="text-gray-400">{s.label}</span>
+                  <span className="text-[11px] font-medium" style={{ color: 'var(--muted-foreground)' }}>
+                    {s.label}
+                  </span>
                 </div>
-                <p className="text-2xl font-black text-gray-900">{s.value}</p>
+                <p className="text-2xl font-black" style={{ color: 'var(--foreground)' }}>
+                  {s.value}
+                </p>
               </div>
             ))}
           </div>
 
-          {/* AI options row */}
+          {/* AI quick-access row */}
           <div className="grid grid-cols-2 gap-3 mb-6">
             <button
               onClick={() => router.push('/trips/new/ai-generator')}
-              className="text-left rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-3.5 flex flex-col gap-2 hover:shadow-md hover:-translate-y-0.5 transition-all"
+              className="text-left rounded-xl border p-3.5 flex flex-col gap-2 hover:shadow-md hover:-translate-y-0.5 transition-all"
+              style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
             >
               <div className="w-9 h-9 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-xl flex items-center justify-center shadow-sm shadow-violet-500/20">
-                <Sparkles size={18} className="text-white" />
+                <Sparkles size={17} className="text-white" />
               </div>
               <div>
-                <p className="font-bold text-gray-900 text-xs leading-tight">Create Trip with AI</p>
-                <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">Prompt, form or guided questions</p>
+                <p className="font-bold text-xs leading-tight" style={{ color: 'var(--foreground)' }}>
+                  Create Trip with AI
+                </p>
+                <p className="text-[10px] mt-0.5 leading-tight" style={{ color: 'var(--muted-foreground)' }}>
+                  Prompt, form or guided questions
+                </p>
               </div>
-              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 self-start">New</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 self-start">
+                New
+              </span>
             </button>
+
             <button
               onClick={() => router.push(`/trips/${trips[0]!.id}/ai-generator`)}
-              className="text-left rounded-2xl border border-fuchsia-100 bg-gradient-to-br from-fuchsia-50 to-pink-50 p-3.5 flex flex-col gap-2 hover:shadow-md hover:-translate-y-0.5 transition-all"
+              className="text-left rounded-xl border p-3.5 flex flex-col gap-2 hover:shadow-md hover:-translate-y-0.5 transition-all"
+              style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
             >
               <div className="w-9 h-9 bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-xl flex items-center justify-center shadow-sm shadow-fuchsia-500/20">
-                <Sparkles size={18} className="text-white" />
+                <Sparkles size={17} className="text-white" />
               </div>
               <div>
-                <p className="font-bold text-gray-900 text-xs leading-tight">Auto-fill Existing Trip</p>
-                <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">Day-by-day itinerary for any trip</p>
+                <p className="font-bold text-xs leading-tight" style={{ color: 'var(--foreground)' }}>
+                  Auto-fill Existing Trip
+                </p>
+                <p className="text-[10px] mt-0.5 leading-tight" style={{ color: 'var(--muted-foreground)' }}>
+                  Day-by-day itinerary for any trip
+                </p>
               </div>
-              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-600 self-start">AI</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-600 self-start">
+                AI
+              </span>
             </button>
           </div>
 
-          {/* Trip cards grid */}
+          {/* Trip cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {trips.map((trip) => (
               <TripCard key={trip.id} trip={trip} onDelete={handleDelete} />

@@ -5,5 +5,10 @@ interface SkeletonProps {
 }
 
 export function Skeleton({ className }: SkeletonProps) {
-  return <div className={cn('animate-pulse bg-gray-100 rounded-xl', className)} />
+  return (
+    <div
+      className={cn('animate-pulse rounded-xl', className)}
+      style={{ backgroundColor: 'var(--muted)' }}
+    />
+  )
 }

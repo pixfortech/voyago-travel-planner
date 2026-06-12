@@ -12,7 +12,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Existing teal scale — unchanged, still used by all current components.
+        // Teal scale — primary brand colour.
         primary: {
           50: '#f0fdfa',
           100: '#ccfbf1',
@@ -25,9 +25,20 @@ const config: Config = {
           800: '#115e59',
           900: '#134e4a',
         },
-        // Semantic design tokens (Phase 0 foundation). Backed by CSS variables in
-        // globals.css so Phase 1 can introduce theming/dark mode without touching
-        // component markup. Not referenced by any component yet.
+        // Warm stone palette — Claude Design accent.
+        warm: {
+          50:  '#F8F5EF',
+          100: '#F0EBE1',
+          200: '#E2D9CC',
+          300: '#CFC3B2',
+          400: '#B5A693',
+          500: '#9A8878',
+          600: '#7A6B5D',
+          700: '#5E5148',
+          800: '#453B34',
+          900: '#2E2720',
+        },
+        // Semantic design tokens — backed by CSS variables for layout switching.
         background: 'var(--background)',
         foreground: 'var(--foreground)',
         card: 'var(--card)',
@@ -39,6 +50,9 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
+      },
+      borderRadius: {
+        'card': '0.875rem',
       },
     },
   },

@@ -31,7 +31,7 @@ export default function AppShell({
   const { authSetupError } = useApp()
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--background)' }}>
       <Header title={title} back={back} actions={actions} />
       {tripId && <TripSubNav tripId={tripId} />}
       <main
