@@ -2,25 +2,186 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   Voyago Design System tokens — the NEW default layout.
+   Bright-but-premium travel palette: teal anchor + destination-
+   sticker spectrum, cool-warm graphite neutrals, paper canvas.
+   html[data-layout="classic"] restores the original look.
+   ============================================================ */
+
 @layer base {
-  /*
-   * Claude Design — warm, sophisticated palette (new layout, default).
-   * html[data-layout="classic"] restores the original cool-gray palette.
-   */
   :root {
-    --background: #F8F5EF;
-    --foreground: #1C1917;
-    --card: #ffffff;
-    --card-foreground: #1C1917;
-    --muted: #F5F5F4;
-    --muted-foreground: #78716C;
-    --border: #E7E5E4;
-    --accent: #14b8a6;
-    --input-bg: #ffffff;
-    --nav-bg: #ffffff;
-    --nav-border: #E7E5E4;
+    /* ---- Brand: Teal (anchor / primary) ---- */
+    --teal-50:  #E6FAF7;
+    --teal-100: #C2F2EB;
+    --teal-200: #8FE6DB;
+    --teal-300: #54D6C7;
+    --teal-400: #20C0B0;
+    --teal-500: #0EA5A0;
+    --teal-600: #0B847F;
+    --teal-700: #0A6562;
+    --teal-800: #084845;
+    --teal-900: #06302E;
+
+    /* ---- Coral (secondary accent) ---- */
+    --coral-50:  #FFF0EE;
+    --coral-100: #FFDAD4;
+    --coral-200: #FFB7AC;
+    --coral-300: #FF9486;
+    --coral-400: #FF7A69;
+    --coral-500: #FF6B5C;
+    --coral-600: #ED4F3F;
+    --coral-700: #C73A2C;
+
+    /* ---- Sunshine ---- */
+    --sun-50:  #FFF8E1;
+    --sun-100: #FFEFB8;
+    --sun-200: #FFE082;
+    --sun-300: #FFD24D;
+    --sun-400: #FFC83D;
+    --sun-500: #F5B71E;
+    --sun-600: #D69A00;
+
+    /* ---- Violet (AI / premium) ---- */
+    --violet-50:  #F1EEFF;
+    --violet-100: #E0D9FF;
+    --violet-200: #C4B7FF;
+    --violet-300: #A492FF;
+    --violet-400: #8B72FF;
+    --violet-500: #7B61FF;
+    --violet-600: #6244E6;
+    --violet-700: #4C32BF;
+
+    /* ---- Sky (info / water / maps) ---- */
+    --sky-50:  #E8F7FE;
+    --sky-100: #C7ECFD;
+    --sky-200: #93DBFB;
+    --sky-300: #5FC8F8;
+    --sky-400: #38BDF8;
+    --sky-500: #169FE0;
+    --sky-600: #0C7FB8;
+
+    /* ---- Orange (food / sunsets) ---- */
+    --orange-400: #FF9A4D;
+    --orange-500: #FF8C42;
+    --orange-600: #ED6F1F;
+
+    /* ---- Green (success / nature) ---- */
+    --green-100: #D6F5E3;
+    --green-400: #4FD68A;
+    --green-500: #34C77B;
+    --green-600: #1FA862;
+
+    /* ---- Ink / neutrals (cool-warm graphite) ---- */
+    --ink-900: #14181F;
+    --ink-800: #20262F;
+    --ink-700: #3A4250;
+    --ink-600: #525C6B;
+    --ink-500: #6B7280;
+    --ink-400: #909AA8;
+    --ink-300: #B4BCC8;
+    --ink-200: #DCE1E9;
+    --ink-100: #ECEFF4;
+    --ink-50:  #F4F6FA;
+    --paper:   #F6F7FB;
+    --white:   #FFFFFF;
+    --black:   #0A0C10;
+
+    /* ---- Signature gradients ---- */
+    --grad-brand:  linear-gradient(135deg, #0EA5A0 0%, #38BDF8 100%);
+    --grad-sunset: linear-gradient(135deg, #FF6B5C 0%, #FF8C42 48%, #FFC83D 100%);
+    --grad-aurora: linear-gradient(135deg, #7B61FF 0%, #38BDF8 55%, #20C0B0 100%);
+    --grad-candy:  linear-gradient(135deg, #FF6B5C 0%, #7B61FF 100%);
+    --grad-mint:   linear-gradient(135deg, #20C0B0 0%, #34C77B 100%);
+    --grad-paper:  radial-gradient(1200px 600px at 0% -10%, #E9FBF8 0%, transparent 55%),
+                   radial-gradient(900px 500px at 100% 0%, #F1EEFF 0%, transparent 50%),
+                   var(--paper);
+
+    /* ---- Semantic aliases ---- */
+    --color-primary:       var(--teal-500);
+    --color-primary-hover: var(--teal-600);
+    --color-primary-soft:  var(--teal-50);
+    --color-accent:        var(--coral-500);
+    --color-ai:            var(--violet-500);
+
+    --text-strong: var(--ink-900);
+    --text-body:   var(--ink-700);
+    --text-muted:  var(--ink-500);
+    --text-faint:  var(--ink-400);
+    --text-link:   var(--teal-600);
+
+    --surface-page:    var(--paper);
+    --surface-card:    var(--white);
+    --surface-sunk:    var(--ink-50);
+    --surface-glass:   rgba(255,255,255,0.62);
+
+    --border-subtle: var(--ink-200);
+    --border-soft:   var(--ink-100);
+    --border-strong: var(--ink-300);
+
+    --status-success: var(--green-500);
+    --status-info:    var(--sky-500);
+    --status-warn:    var(--sun-500);
+    --status-danger:  var(--coral-600);
+
+    /* ---- Radii ---- */
+    --radius-xs: 6px;
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 20px;
+    --radius-xl: 28px;
+    --radius-2xl: 36px;
+    --radius-pill: 999px;
+
+    /* ---- Shadows ---- */
+    --shadow-xs: 0 1px 2px rgba(20,24,31,0.06);
+    --shadow-sm: 0 2px 6px rgba(20,24,31,0.07), 0 1px 2px rgba(20,24,31,0.05);
+    --shadow-md: 0 8px 20px rgba(20,24,31,0.08), 0 2px 6px rgba(20,24,31,0.05);
+    --shadow-lg: 0 18px 40px rgba(20,24,31,0.12), 0 6px 14px rgba(20,24,31,0.06);
+    --shadow-xl: 0 30px 70px rgba(20,24,31,0.18), 0 10px 24px rgba(20,24,31,0.08);
+    --shadow-hover: 0 22px 48px rgba(20,24,31,0.16), 0 8px 18px rgba(20,24,31,0.08);
+
+    /* ---- Glows ---- */
+    --glow-teal:   0 10px 26px rgba(14,165,160,0.40);
+    --glow-coral:  0 10px 26px rgba(255,107,92,0.42);
+    --glow-violet: 0 10px 26px rgba(123,97,255,0.40);
+    --glow-sun:    0 10px 26px rgba(255,200,61,0.45);
+
+    /* ---- Blur / rings / motion ---- */
+    --blur-sm: blur(6px);
+    --blur-md: blur(14px);
+    --ring-focus: 0 0 0 3px rgba(14,165,160,0.30);
+    --ring-focus-coral: 0 0 0 3px rgba(255,107,92,0.30);
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --dur-fast: 0.15s;
+    --dur-base: 0.25s;
+    --dur-slow: 0.45s;
+
+    /* ---- Fonts ---- */
+    --font-display: var(--font-bricolage), var(--font-lexend), system-ui, sans-serif;
+    --font-sans:    var(--font-lexend), system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono:    var(--font-space-mono), ui-monospace, 'SFMono-Regular', monospace;
+
+    /* ---- App shell semantic tokens (drive theme switching) ---- */
+    --background: var(--paper);
+    --foreground: var(--ink-900);
+    --card: var(--white);
+    --card-foreground: var(--ink-900);
+    --muted: var(--ink-50);
+    --muted-foreground: var(--ink-500);
+    --border: var(--ink-100);
+    --accent: var(--teal-500);
+    --input-bg: var(--white);
+    --nav-bg: rgba(255,255,255,0.85);
+    --nav-border: var(--ink-100);
+
+    --app-font: var(--font-sans);
+    --app-canvas: var(--grad-paper);
   }
 
+  /* ---- Classic layout (original cool-gray + Inter) ---- */
   html[data-layout="classic"] {
     --background: #f9fafb;
     --foreground: #111827;
@@ -31,8 +192,16 @@
     --border: #f3f4f6;
     --accent: #14b8a6;
     --input-bg: #ffffff;
-    --nav-bg: #ffffff;
+    --nav-bg: rgba(255,255,255,0.9);
     --nav-border: #f3f4f6;
+
+    --text-strong: #111827;
+    --text-body: #374151;
+    --text-muted: #6b7280;
+    --text-faint: #9ca3af;
+
+    --app-font: var(--font-inter), system-ui, sans-serif;
+    --app-canvas: #f9fafb;
   }
 
   .dark {
@@ -45,7 +214,7 @@
     --border: #1f2937;
     --accent: #2dd4bf;
     --input-bg: #1f2937;
-    --nav-bg: #111827;
+    --nav-bg: rgba(17,24,39,0.9);
     --nav-border: #1f2937;
   }
 
@@ -54,14 +223,18 @@
   }
 
   body {
-    background-color: var(--background);
+    background: var(--app-canvas);
+    background-attachment: fixed;
     color: var(--foreground);
+    font-family: var(--app-font);
     @apply antialiased;
   }
 
   * {
     box-sizing: border-box;
   }
+
+  ::selection { background: var(--teal-200); color: var(--ink-900); }
 }
 
 @layer utilities {
@@ -69,10 +242,72 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* Semantic surface utilities using CSS variables */
+  /* Brand utilities */
+  .font-display { font-family: var(--font-display); }
+  .font-mono-vy { font-family: var(--font-mono); }
+
+  .vy-eyebrow {
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .vy-gradient-text {
+    background: var(--grad-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .vy-glass {
+    background: var(--surface-glass);
+    -webkit-backdrop-filter: var(--blur-md);
+    backdrop-filter: var(--blur-md);
+    border: 1px solid rgba(255,255,255,0.55);
+    border-radius: var(--radius-lg);
+  }
+
+  .vy-map-texture {
+    background-color: var(--teal-50);
+    background-image:
+      linear-gradient(rgba(14,165,160,0.10) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(14,165,160,0.10) 1px, transparent 1px);
+    background-size: 26px 26px;
+  }
+
+  .vy-pulse { position: relative; }
+  .vy-pulse::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(255,107,92,0.55);
+    animation: vy-pulse-ring 1.8s var(--ease-out) infinite;
+  }
+  @keyframes vy-pulse-ring {
+    to { box-shadow: 0 0 0 14px rgba(255,107,92,0); }
+  }
+
+  @keyframes vySpin { to { transform: rotate(360deg); } }
+  @keyframes vyToast {
+    from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  /* Surface helpers */
   .bg-surface { background-color: var(--background); }
   .bg-card-surface { background-color: var(--card); }
   .text-surface-fg { color: var(--foreground); }
   .text-muted-fg { color: var(--muted-foreground); }
   .border-surface { border-color: var(--border); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

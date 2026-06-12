@@ -2,14 +2,16 @@
 
 import { useLayout } from '@/context/LayoutContext'
 
-/** Tiny, unobtrusive layout toggle — localStorage-persisted. */
+/** Tiny, unobtrusive layout toggle — localStorage-persisted. Visible on mobile too. */
 export default function LayoutSwitch() {
   const { layout, toggleLayout } = useLayout()
   return (
     <button
       onClick={toggleLayout}
       title={layout === 'new' ? 'Switch to classic layout' : 'Switch to new layout'}
-      className="hidden sm:flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--muted-foreground)] transition-colors select-none shrink-0"
+      aria-label={layout === 'new' ? 'Switch to classic layout' : 'Switch to new layout'}
+      className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors select-none shrink-0"
+      style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}
     >
       {layout === 'new' ? 'Classic' : 'New UI'}
     </button>

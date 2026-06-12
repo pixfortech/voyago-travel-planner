@@ -1,4 +1,4 @@
-import { type InputHTMLAttributes, forwardRef } from 'react'
+import { type InputHTMLAttributes, forwardRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -7,37 +7,38 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, id, style, ...props }, ref) => {
+  ({ className, label, error, id, style, onFocus, onBlur, ...props }, ref) => {
+    const [focus, setFocus] = useState(false)
+    const borderColor = error
+      ? 'var(--coral-500)'
+      : focus
+      ? 'var(--teal-500)'
+      : 'var(--border-subtle)'
+
     return (
       <div className="w-full">
         {label && (
-          <label
-            htmlFor={id}
-            className="block text-sm font-medium mb-1.5"
-            style={{ color: 'var(--foreground)' }}
-          >
+          <label htmlFor={id} className="block text-[13px] font-semibold mb-1.5" style={{ color: 'var(--text-body)' }}>
             {label}
           </label>
         )}
         <input
           ref={ref}
           id={id}
-          className={cn(
-            'w-full px-4 py-3 rounded-xl border text-sm transition-all',
-            'placeholder-[var(--muted-foreground)]',
-            'focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent',
-            error && 'border-red-400 focus:ring-red-400',
-            className
-          )}
+          onFocus={(e) => { setFocus(true); onFocus?.(e) }}
+          onBlur={(e) => { setFocus(false); onBlur?.(e) }}
+          className={cn('w-full px-3.5 py-3 text-[15px] transition-all outline-none', className)}
           style={{
-            backgroundColor: 'var(--muted)',
-            borderColor: 'var(--border)',
-            color: 'var(--foreground)',
+            background: 'var(--input-bg)',
+            border: `1.5px solid ${borderColor}`,
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--text-strong)',
+            boxShadow: focus ? (error ? 'var(--ring-focus-coral)' : 'var(--ring-focus)') : 'var(--shadow-xs)',
             ...style,
           }}
           {...props}
         />
-        {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+        {error && <p className="mt-1 text-[12.5px]" style={{ color: 'var(--coral-600)' }}>{error}</p>}
       </div>
     )
   }

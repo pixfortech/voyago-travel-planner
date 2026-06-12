@@ -1,0 +1,8 @@
+<svg width="360" height="96" viewBox="0 0 360 96" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Voyago">
+  <rect x="8" y="8" width="80" height="80" rx="22" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"></rect>
+  <path d="M26 64 C 36 43, 60 43, 70 28" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" stroke-dasharray="0.4 8.5" opacity="0.9"></path>
+  <circle cx="26" cy="64" r="5.5" fill="#FFC83D" stroke="#FFFFFF" stroke-width="2.4"></circle>
+  <path d="M70 18 C 62 18, 55.5 24.5, 55.5 32.5 C 55.5 42, 70 54, 70 54 C 70 54, 84.5 42, 84.5 32.5 C 84.5 24.5, 78 18, 70 18 Z" fill="#FF6B5C"></path>
+  <circle cx="70" cy="32.5" r="5.2" fill="#FFFFFF"></circle>
+  <text x="108" y="62" font-family="&#39;Bricolage Grotesque&#39;,&#39;Lexend&#39;,sans-serif" font-size="46" font-weight="800" letter-spacing="-1.5" fill="#FFFFFF">Voyago</text>
+</svg>
