@@ -32,7 +32,7 @@ export default function TripCard({ trip, onDelete }: TripCardProps) {
             <div className="flex items-start justify-between mb-3">
               <div className="flex-1 min-w-0 pr-2">
                 <h3
-                  className="font-bold text-base leading-tight truncate"
+                  className="font-display font-extrabold text-[17px] leading-tight truncate"
                   style={{ color: 'var(--foreground)' }}
                 >
                   {trip.name}

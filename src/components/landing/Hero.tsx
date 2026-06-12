@@ -197,10 +197,11 @@ export default function Hero() {
               </Link>
               <Link
                 href="/trips/new/ai-generator"
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 bg-white/[0.08] border border-white/15 text-white font-semibold px-7 py-3.5 rounded-xl text-sm hover:bg-white/[0.12] transition-all"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 text-white font-bold px-7 py-3.5 rounded-xl text-sm transition-all hover:-translate-y-0.5 hover:saturate-[1.08]"
+                style={{ backgroundImage: 'linear-gradient(135deg, #7B61FF 0%, #38BDF8 55%, #20C0B0 100%)', boxShadow: '0 10px 26px rgba(123,97,255,0.40)' }}
               >
-                <Sparkles size={16} className="text-violet-400" />
-                Try AI Generator
+                <Sparkles size={16} />
+                Generate AI plan
               </Link>
             </div>
 

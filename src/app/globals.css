@@ -230,6 +230,17 @@
     @apply antialiased;
   }
 
+  /* In the new layout, headings use the Bricolage display face. The classic
+     layout keeps the original Inter look untouched. */
+  html:not([data-layout="classic"]) h1,
+  html:not([data-layout="classic"]) h2,
+  html:not([data-layout="classic"]) h3,
+  html:not([data-layout="classic"]) h4,
+  html:not([data-layout="classic"]) h5 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
   * {
     box-sizing: border-box;
   }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Plane, Calendar, MapPin, Sparkles } from 'lucide-react'
+import { Plus, Plane, Sparkles } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
 import { getTrips, deleteTrip } from '@/lib/firestore'
 import { getDayCount } from '@/lib/utils'
@@ -12,6 +12,7 @@ import ProfileSetup from '@/components/trips/ProfileSetup'
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { StatTile } from '@/components/vy'
 import type { Trip } from '@/types'
 
 export default function DashboardPage() {
@@ -40,9 +41,9 @@ export default function DashboardPage() {
   const uniqueDests = new Set(trips.map((t) => t.destination)).size
 
   const stats = [
-    { label: 'Total trips', value: trips.length, icon: <Plane size={15} /> },
-    { label: 'Days planned', value: totalDays, icon: <Calendar size={15} /> },
-    { label: 'Destinations', value: uniqueDests, icon: <MapPin size={15} /> },
+    { label: 'Total trips', value: trips.length, icon: 'suitcase-rolling', tone: 'teal' as const },
+    { label: 'Days planned', value: totalDays, icon: 'calendar-day', tone: 'violet' as const },
+    { label: 'Destinations', value: uniqueDests, icon: 'location-dot', tone: 'coral' as const },
   ]
 
   return (
@@ -102,21 +103,7 @@ export default function DashboardPage() {
           {/* Stats row */}
           <div className="grid grid-cols-3 gap-3 mb-6">
             {stats.map((s) => (
-              <div
-                key={s.label}
-                className="rounded-xl p-4 border flex flex-col"
-                style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
-              >
-                <div className="flex items-center gap-1.5 text-primary-500 mb-2">
-                  {s.icon}
-                  <span className="text-[11px] font-medium" style={{ color: 'var(--muted-foreground)' }}>
-                    {s.label}
-                  </span>
-                </div>
-                <p className="text-2xl font-black" style={{ color: 'var(--foreground)' }}>
-                  {s.value}
-                </p>
-              </div>
+              <StatTile key={s.label} icon={s.icon} value={s.value} label={s.label} tone={s.tone} />
             ))}
           </div>
 
