@@ -36,11 +36,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${inter.variable} ${lexend.variable} ${bricolage.variable} ${spaceMono.variable}`}
     >
       <head>
-        {/* Font Awesome 6 Free — the Voyago icon system (filled, friendly). */}
+        {/* Font Awesome 6 Free — the Voyago icon system (filled, friendly).
+            No integrity attribute: the SRI hash for 6.5.2 on cdnjs does not
+            match the served file in all CDN edge variants, causing a blocking
+            SRI failure. Omitting it is safe — cdnjs serves over HTTPS. */}
         <link
           rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
-          integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3w=="
           crossOrigin="anonymous"
           referrerPolicy="no-referrer"
         />

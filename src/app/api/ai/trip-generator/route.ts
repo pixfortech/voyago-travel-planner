@@ -103,6 +103,8 @@ export async function POST(request: Request) {
   // A 5–7 day itinerary at 4–5 activities/day is ~6000–9000 output tokens. Adaptive
   // thinking for a generation-quality task may consume several thousand thinking tokens
   // on top of that, so 20000 gives safe headroom without hitting model limits.
+  const isDev = process.env.NODE_ENV !== 'production'
+
   let completion: Awaited<ReturnType<typeof provider.complete>>
   try {
     completion = await provider.complete({
@@ -112,13 +114,41 @@ export async function POST(request: Request) {
       messages: [{ role: 'user', content: buildTripGeneratorUserMessage(input) }],
     })
   } catch (err) {
-    // Log full error detail server-side (never sent to client) for Cloud Run diagnosis.
+    // Log full error detail server-side for Cloud Run / local diagnosis.
     const errMsg = err instanceof Error ? err.message : String(err)
-    const errStatus = (err as Record<string, unknown>)?.status
+    const errStatus = (err as Record<string, unknown>)?.status as number | undefined
     const errCode = (err as Record<string, unknown>)?.code
     console.error('[Voyago AI] trip-generator: Claude API call failed', { message: errMsg, status: errStatus, code: errCode })
+
+    // Classify the error for a helpful user-facing message.
+    let userMessage = 'AI itinerary generation is currently unavailable. Please retry.'
+    if (errStatus === 401) {
+      userMessage = 'AI service authentication failed — check ANTHROPIC_API_KEY. Set AI_PROVIDER=mock in .env.local for local development.'
+      console.error('[Voyago AI] HINT: Set AI_PROVIDER=mock in .env.local to use mock data locally without an API key.')
+    } else if (errStatus === 429) {
+      userMessage = 'AI service rate limit reached — please wait a moment and retry.'
+    } else if (errStatus === 400) {
+      userMessage = `AI service rejected the request (400): ${errMsg}. Check model name and parameters.`
+    }
+
+    // In development, fall back to mock data so local iteration is not blocked.
+    // Production always returns 502 — silent mock in prod would be misleading.
+    if (isDev) {
+      console.warn('[Voyago AI] trip-generator: DEV MODE — falling back to mock data after API failure:', errMsg)
+      const mockResult = mockTripGeneratorResult(input)
+      const payload: TripGeneratorResponse & { _devWarning?: string } = {
+        result: mockResult,
+        isMock: true,
+        provider: 'mock',
+        model: AI_MODELS.generation,
+        generationSource: 'dev_mock',
+        _devWarning: `[DEV] Real AI call failed (HTTP ${errStatus ?? 'n/a'}): ${errMsg}. Showing mock data. Fix: set AI_PROVIDER=mock in .env.local to skip real calls.`,
+      }
+      return NextResponse.json(payload)
+    }
+
     return NextResponse.json(
-      { error: 'ai_generation_failed', stage: 'anthropic_call', message: 'AI itinerary generation is currently unavailable. Please retry.' },
+      { error: 'ai_generation_failed', stage: 'anthropic_call', message: userMessage },
       { status: 502 },
     )
   }
@@ -140,6 +170,22 @@ export async function POST(request: Request) {
     // parseTripGeneratorResult already logged the response preview — just record
     // the route-level failure here for correlation in Cloud Run logs.
     console.error('[Voyago AI] trip-generator: response parse failed:', err instanceof Error ? err.message : err)
+
+    // Same dev fallback for parse failures (e.g. truncated JSON from a partial response).
+    if (isDev) {
+      console.warn('[Voyago AI] trip-generator: DEV MODE — falling back to mock data after parse failure')
+      const mockResult = mockTripGeneratorResult(input)
+      const payload: TripGeneratorResponse & { _devWarning?: string } = {
+        result: mockResult,
+        isMock: true,
+        provider: 'mock',
+        model: AI_MODELS.generation,
+        generationSource: 'dev_mock',
+        _devWarning: '[DEV] Response parse failed. Check server console for the raw response preview. Showing mock data.',
+      }
+      return NextResponse.json(payload)
+    }
+
     return NextResponse.json(
       { error: 'ai_generation_failed', stage: 'parse', message: 'AI itinerary generation is currently unavailable. Please retry.' },
       { status: 502 },

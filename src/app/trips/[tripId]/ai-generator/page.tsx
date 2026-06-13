@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Info, Sparkles, AlertTriangle } from 'lucide-react'
+import { Sparkles, AlertTriangle } from 'lucide-react'
 import {
   getTrip, getItineraryDays, updateItineraryDay,
 } from '@/lib/firestore'
@@ -280,14 +280,13 @@ export default function AiGeneratorPage() {
           />
         )}
 
-        {/* New-trip draft generation — clearly Coming Soon */}
-        <div className="flex items-start gap-2 rounded-2xl bg-gray-50 border border-gray-100 p-3.5">
-          <Info size={15} className="text-gray-400 mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-gray-500 leading-relaxed">
-            <strong>Generating a brand-new trip from scratch</strong> (before it exists) is coming soon. For now,
-            create the trip first, then use this generator to auto-fill its itinerary.
-          </p>
-        </div>
+        {/* Link to new-trip AI generator for users who want to start fresh. */}
+        <p className="text-xs text-gray-500 text-center">
+          Want to generate a brand-new trip from scratch?{' '}
+          <a href="/trips/new/ai-generator" className="font-semibold text-violet-600 hover:underline">
+            Use the Create Trip with AI flow →
+          </a>
+        </p>
       </div>
     </AppShell>
   )
