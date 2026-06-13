@@ -1588,25 +1588,38 @@ function itemBasisLabel(basis: SuggestedFoodItem['basis'], confidence: Suggested
     case 'user_entered':
       return 'Confirmed price'
     case 'official_menu_or_website':
-      return 'Menu-based estimate'
+      return 'Menu-inspired'
     case 'google_review_item_mentions':
-      return 'Review-mentioned dish'
+      return 'Review-mentioned'
     case 'google_review_price_clues':
       return 'Review-based estimate'
     case 'google_price_level':
-      return 'Google price-level estimate'
+      return 'Google price-level'
+    case 'local_cuisine_inference':
+      return 'AI suggested'
     case 'restaurant_type_city_heuristic':
     default:
-      return confidence === 'low' ? 'Heuristic estimate' : 'Estimate'
+      return confidence === 'low' ? 'AI suggested' : 'Estimate'
   }
 }
 
+/** Review popularity — never claims sales/order data, so no "Best seller" wording. */
 function popularityHintLabel(hint: SuggestedFoodItem['popularityHint']): string | null {
   switch (hint) {
-    case 'best_seller': return '★ Best seller'
-    case 'popular': return '★ Popular'
-    case 'often_mentioned': return 'Often mentioned'
-    case 'recommended': return 'Recommended'
+    case 'best_seller': return 'Popular pick'
+    case 'popular': return 'Popular pick'
+    case 'often_mentioned': return 'Review-mentioned'
+    case 'recommended': return 'Recommended in reviews'
+    default: return null
+  }
+}
+
+function recommendationTagLabel(tag: SuggestedFoodItem['recommendationTag']): string | null {
+  switch (tag) {
+    case 'must_try': return 'Must-try'
+    case 'local_speciality': return 'Local favourite'
+    case 'safe_pick': return 'Safe pick'
+    case 'kid_friendly': return 'Kid-friendly'
     default: return null
   }
 }
@@ -1657,6 +1670,10 @@ function SuggestedItemsBlock({
             </button>
             <span style={{ fontWeight: 600, color: 'var(--text-strong)', textDecoration: isRemoved ? 'line-through' : undefined }}>{item.name}</span>
             {badge && <Badge size="sm" style={{ fontSize: 9, padding: '2px 6px' }} variant={badge.label === 'Veg' || badge.label === 'Vegan' ? 'teal' : 'coral'}>{badge.label}</Badge>}
+            {(() => {
+              const rec = recommendationTagLabel(item.recommendationTag)
+              return rec ? <Badge size="sm" style={{ fontSize: 9, padding: '2px 6px' }} variant="teal">{rec}</Badge> : null
+            })()}
             {item.popularityHint && item.popularityHint !== 'unknown' && (() => {
               const ph = popularityHintLabel(item.popularityHint)
               return ph ? (
@@ -1703,6 +1720,12 @@ function ActivityRow({
   const [open, setOpen] = useState(false)
   const v = verifyState(act)
 
+  // A food break with local/AI dish ideas but NO real Google source (neither a
+  // restaurantSuggestion nor a geo-verified place) — never marked "verified".
+  const rs = act.restaurantSuggestion
+  const isAiFood = act.category === 'food' && !rs && v !== 'verified' &&
+    (act.foodSuggestionSource === 'ai' || (act.suggestedItems != null && act.suggestedItems.length > 0))
+
   // Terminal-anchor hotfix PART 5 — a terminal departure is a hard end event.
   const isTerminal = !!act._terminalDeparture
   const departWord =
@@ -1744,11 +1767,15 @@ function ActivityRow({
           </div>
           {/* Badges */}
           <div className="flex items-center flex-wrap gap-1 mt-1">
-            {act.isBreak && <Badge variant="orange" size="sm">Break</Badge>}
+            {/* Food break with no real place → clearly AI-suggested, never "verified". */}
+            {isAiFood && <Badge variant="sun" size="sm"><Sparkles size={9} /> AI suggested meal break</Badge>}
+            {!isAiFood && act.isBreak && !rs && <Badge variant="orange" size="sm">Break</Badge>}
+            {/* Real Google restaurant suggestion for a food slot. */}
+            {rs && act.category === 'food' && <Badge variant="teal" size="sm"><ShieldCheck size={9} /> Google place</Badge>}
             {/* PART 12A — a geographically-wrong match must not claim "Verified by Google". */}
-            {v === 'verified' && !suspect && <Badge variant="teal" size="sm"><ShieldCheck size={9} /> Verified</Badge>}
+            {!isAiFood && !rs && v === 'verified' && !suspect && <Badge variant="teal" size="sm"><ShieldCheck size={9} /> Verified</Badge>}
             {suspect && <Badge variant="coral" size="sm"><ShieldAlert size={9} /> Verify match</Badge>}
-            {v === 'unverified' && !suspect && <Badge variant="sun" size="sm"><ShieldAlert size={9} /> Unverified</Badge>}
+            {!isAiFood && v === 'unverified' && !suspect && <Badge variant="sun" size="sm"><ShieldAlert size={9} /> Unverified</Badge>}
             {act._autoCategory && <Badge variant="violet" size="sm">Auto-category</Badge>}
             {act._placeRating != null && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>★ {act._placeRating}{act._placeUserRatings ? ` (${act._placeUserRatings})` : ''}</span>}
             {/* Part 7: meal-time mismatch */}
@@ -1757,13 +1784,22 @@ function ActivityRow({
             {act._onboardMeal && <Badge variant="sky" size="sm">Onboard / packed</Badge>}
             {act._terminalDeparture && <Badge variant="violet" size="sm"><i className="fas fa-train" style={{ fontSize: 9 }} /> Departure</Badge>}
           </div>
-          {/* Phase 16D — restaurant suggestion for food breaks */}
-          {act.restaurantSuggestion && act.category === 'food' && (
+          {/* AI-suggested meal break (no real place) — soft, honest note */}
+          {isAiFood && (
+            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--sun-700)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
+              <Info size={9} style={{ flexShrink: 0 }} />
+              <span>Restaurant not verified yet — local dish ideas below. Pick a place on the spot or resolve it via Google.</span>
+            </div>
+          )}
+          {/* Phase 16D — restaurant suggestion for food breaks (Google-backed) */}
+          {rs && act.category === 'food' && (
             <>
               <div style={{ marginTop: 6, fontSize: 11, color: 'var(--green-700)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
-                <ShieldCheck size={9} style={{ flexShrink: 0 }} />
-                <span style={{ fontWeight: 600 }}>{act.restaurantSuggestion.name}</span>
-                {act.restaurantSuggestion.rating != null && <span style={{ color: 'var(--text-muted)' }}>★{act.restaurantSuggestion.rating}</span>}
+                <MapPin size={9} style={{ flexShrink: 0 }} />
+                <span style={{ fontWeight: 600 }}>{rs.name}</span>
+                {rs.rating != null && <span style={{ color: 'var(--text-muted)' }}>★{rs.rating}{rs.userRatingsTotal ? ` · ${rs.userRatingsTotal.toLocaleString()} reviews` : ''}</span>}
+                {rs.cuisineTypes && rs.cuisineTypes.length > 0 && <span style={{ color: 'var(--text-muted)' }}>· {rs.cuisineTypes.join(' · ')}</span>}
+                {rs.openNow === true && <span style={{ color: 'var(--green-600)', fontWeight: 600 }}>· Open now</span>}
                 {act.estimatedSpendRange && (
                   <span style={{ color: 'var(--text-muted)' }}>
                     · ≈{formatCurrency(act.estimatedSpendRange.perPersonMin, currency)}–{formatCurrency(act.estimatedSpendRange.perPersonMax, currency)}/person
@@ -1782,35 +1818,45 @@ function ActivityRow({
                   Menu/website available — prices still shown as estimates unless parsed confidently.
                 </a>
               )}
-              {act.suggestedItems && act.suggestedItems.length > 0 && (
-                <SuggestedItemsBlock
-                  items={act.suggestedItems}
-                  removedKeys={act._removedItemKeys ?? []}
-                  currency={currency}
-                  travellerCount={travellerCount}
-                  onToggleItem={(key) => {
-                    const current = act._removedItemKeys ?? []
-                    const nextRemoved = current.includes(key)
-                      ? current.filter((k) => k !== key)
-                      : [...current, key]
-                    // Recompute estimatedCost from remaining items × travellers so
-                    // removed options no longer count in the budget.
-                    const removedSet = new Set(nextRemoved)
-                    const items = act.suggestedItems ?? []
-                    const perPersonMid = items.reduce((sum, it, idx) => {
-                      if (removedSet.has(itemKey(it, idx))) return sum
-                      return sum + (it.estimatedPriceMin + it.estimatedPriceMax) / 2
-                    }, 0)
-                    const n = Math.max(1, travellerCount)
-                    onPatch({
-                      _removedItemKeys: nextRemoved,
-                      estimatedCost: Math.round(perPersonMid * n),
-                      estimatedCostPerPerson: Math.round(perPersonMid),
-                    })
-                  }}
-                />
-              )}
             </>
+          )}
+          {/* Food rationale + pairing (Google or AI) */}
+          {(rs || isAiFood) && act.foodWhyHere && (
+            <p style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-muted)' }}>
+              <MapPin size={8} style={{ marginRight: 4 }} />Why here: {act.foodWhyHere}
+            </p>
+          )}
+          {(rs || isAiFood) && act.foodPairingNote && (
+            <p style={{ marginTop: 3, fontSize: 10.5, color: 'var(--text-muted)' }}>{act.foodPairingNote}</p>
+          )}
+          {/* Suggested food items (Google-backed or AI/local inference) */}
+          {act.category === 'food' && act.suggestedItems && act.suggestedItems.length > 0 && (
+            <SuggestedItemsBlock
+              items={act.suggestedItems}
+              removedKeys={act._removedItemKeys ?? []}
+              currency={currency}
+              travellerCount={travellerCount}
+              onToggleItem={(key) => {
+                const current = act._removedItemKeys ?? []
+                const nextRemoved = current.includes(key)
+                  ? current.filter((k) => k !== key)
+                  : [...current, key]
+                // Recompute estimatedCost from remaining items × travellers so
+                // removed options no longer count in the budget.
+                const removedSet = new Set(nextRemoved)
+                const items = act.suggestedItems ?? []
+                const perPersonMid = items.reduce((sum, it, idx) => {
+                  if (removedSet.has(itemKey(it, idx))) return sum
+                  return sum + (it.estimatedPriceMin + it.estimatedPriceMax) / 2
+                }, 0)
+                const n = Math.max(1, travellerCount)
+                onPatch({
+                  _removedItemKeys: nextRemoved,
+                  estimatedCost: Math.round(perPersonMid * n),
+                  estimatedCostPerPerson: Math.round(perPersonMid),
+                })
+              }}
+            />
           )}
           {/* PART 5 — terminal departure card */}
           {isTerminal ? (

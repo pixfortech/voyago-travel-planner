@@ -19,6 +19,7 @@ import GeneratedItineraryPreview, {
 } from '@/components/ai/GeneratedItineraryPreview'
 import VyBriefForm from '@/components/ai/VyBriefForm'
 import { type TripBrief } from '@/components/ai/briefTypes'
+import { buildLocalFoodSuggestion } from '@/lib/ai/localFoodSuggestions'
 import { useLayout } from '@/context/LayoutContext'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import { getDayCount } from '@/lib/utils'
@@ -226,6 +227,64 @@ function pruneDeep<T>(value: T): T | undefined {
 
 function toggle<T>(arr: T[], val: T): T[] {
   return arr.includes(val) ? arr.filter((v) => v !== val) : [...arr, val]
+}
+
+/** Display label for a meal slot. */
+function mealSlotLabel(mt?: string): string {
+  switch (mt) {
+    case 'breakfast': return 'Breakfast'
+    case 'dinner': return 'Dinner'
+    case 'snack': return 'Snack'
+    case 'cafe': return 'Café stop'
+    default: return 'Lunch'
+  }
+}
+
+/** A generic, placeholder-style food title we may safely upgrade to "<Meal> at <Place>". */
+function isGenericFoodTitle(title: string): boolean {
+  const t = (title || '').trim().toLowerCase()
+  if (!t) return true
+  return t.length < 42 && /(break|meal|lunch|dinner|breakfast|snack|caf[eé]|food|eat|stop|bite)/.test(t)
+}
+
+/**
+ * Fill food breaks that have NO Google restaurant with destination-appropriate
+ * local dish ideas (clearly labelled AI inference, never "verified"). Runs in
+ * all modes — including mock / Maps-off — so meals are never a bare "Break".
+ * Never overrides a Google-backed suggestion.
+ */
+function attachLocalFoodSuggestions(result: TripGeneratorResult, brief: TripBrief): TripGeneratorResult {
+  const dayPlans = result.dayPlans.map((day) => ({
+    ...day,
+    activities: day.activities.map((act) => {
+      if (act.category !== 'food') return act
+      // Respect Google results and onboard/packed travel meals — don't touch them.
+      if (act.restaurantSuggestion) return act
+      if (act.suggestedItems && act.suggestedItems.length > 0) return act
+      const suggestion = buildLocalFoodSuggestion({
+        destination: brief.destination.trim(),
+        mealType: act.mealType,
+        foodPreferences: brief.preferences.foodPreferences,
+        currency: brief.currency,
+        foodBudgetStyle: brief.preferences.foodBudgetStyle,
+        localityHint: act.locationName || undefined,
+      })
+      if (!suggestion) return act
+      const perPersonMid = suggestion.items.reduce((s, it) => s + (it.estimatedPriceMin + it.estimatedPriceMax) / 2, 0)
+      const n = Math.max(1, brief.travellerCount)
+      return {
+        ...act,
+        suggestedItems: suggestion.items,
+        foodSuggestionSource: 'ai' as const,
+        foodWhyHere: suggestion.whyHere,
+        foodPairingNote: suggestion.pairingNote,
+        // Only fill the cost when the generator left it at zero — never override an estimate.
+        estimatedCost: act.estimatedCost && act.estimatedCost > 0 ? act.estimatedCost : Math.round(perPersonMid * n),
+        estimatedCostPerPerson: act.estimatedCostPerPerson && act.estimatedCostPerPerson > 0 ? act.estimatedCostPerPerson : Math.round(perPersonMid),
+      }
+    }),
+  }))
+  return { ...result, dayPlans }
 }
 
 /** Map the unified accommodation draft to the preview's budget PlannedStay shape. */
@@ -1098,9 +1157,12 @@ export default function NewTripAiGeneratorPage() {
       }
 
       // Parts 5 & 6 — deterministically fix arrival/departure times from form.
-      const finalResult = transportContext
+      const anchoredResult = transportContext
         ? injectTransportAnchors(enrichedResult, transportContext, brief.destination)
         : enrichedResult
+      // Fill any meal break still without a real restaurant with local cuisine
+      // ideas (AI inference, clearly labelled) so no meal is a bare "Break".
+      const finalResult = attachLocalFoodSuggestions(anchoredResult, brief)
       setResult(finalResult)
       setIsMock(data.isMock)
       setStage('preview')
@@ -1117,8 +1179,13 @@ export default function NewTripAiGeneratorPage() {
       activities: day.activities.map((act, ai) => {
         const patch = patches.find((p) => p.dayIdx === di && p.actIdx === ai)
         if (!patch) return act
+        // Upgrade a generic "Lunch break" title to "Lunch at <Restaurant>".
+        const title = isGenericFoodTitle(act.title)
+          ? `${mealSlotLabel(act.mealType)} at ${patch.restaurantSuggestion.name}`
+          : act.title
         const enriched: GeneratedActivity = {
           ...act,
+          title,
           restaurantSuggestion: patch.restaurantSuggestion,
           estimatedSpendRange: patch.estimatedSpendRange,
           spendConfidence: patch.spendConfidence,
@@ -1127,6 +1194,9 @@ export default function NewTripAiGeneratorPage() {
           suggestedItems: patch.suggestedItems,
           menuSourceUrl: patch.menuSourceUrl,
           menuSourceType: patch.menuSourceType,
+          foodSuggestionSource: patch.foodSuggestionSource,
+          foodWhyHere: patch.foodWhyHere,
+          foodPairingNote: patch.foodPairingNote,
           // Append dietary note to foodInsightNotes when present
           foodInsightNotes: patch.dietaryNote
             ? [act.foodInsightNotes, patch.dietaryNote].filter(Boolean).join(' ')
@@ -1179,6 +1249,9 @@ export default function NewTripAiGeneratorPage() {
             if (a.description) noteParts.push(a.description)
             if (a.whyRecommended) noteParts.push(`Why: ${a.whyRecommended}`)
             if (a.routeNotes) noteParts.push(a.routeNotes)
+            // Persist food rationale + pairing as notes (no extra Firestore schema).
+            if (a.foodWhyHere) noteParts.push(a.foodWhyHere)
+            if (a.foodPairingNote) noteParts.push(`Pairing: ${a.foodPairingNote}`)
             noteParts.push('(AI Trip Generator)')
             if (a._placeId) verified++; else unverified++
             // Phase 16D — persist restaurant suggestion as foodInsight so it
@@ -1197,6 +1270,8 @@ export default function NewTripAiGeneratorPage() {
                   updatedAt: new Date().toISOString(),
                 }
               : undefined
+            // Drop any nested undefined (Firestore rejects undefined at any depth).
+            const foodInsight = foodInsightFromSuggestion ? pruneDeep(foodInsightFromSuggestion) : undefined
             return stripUndefined({
               id: `ai-${day.id}-${Math.random().toString(36).slice(2, 9)}`,
               type: categoryToActivityType(a.category),
@@ -1230,7 +1305,7 @@ export default function NewTripAiGeneratorPage() {
               lat: a._lat,
               lng: a._lng,
               suggestedCategorySource: a._autoCategory ? ('google_place_type' as const) : undefined,
-              foodInsight: foodInsightFromSuggestion,
+              foodInsight,
               // Phase 16F — persist location context (elevation/weather/AQI/time zone).
               activityContext: a._activityContext ? pruneDeep(a._activityContext) : undefined,
               updatedAt: new Date().toISOString(),

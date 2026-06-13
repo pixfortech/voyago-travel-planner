@@ -1488,6 +1488,7 @@ export type SuggestedFoodItemBasis =
   | 'google_review_price_clues'
   | 'google_price_level'
   | 'restaurant_type_city_heuristic'
+  | 'local_cuisine_inference'        // AI/local-knowledge dish for the destination's cuisine (no place data)
   | 'user_entered'
   | 'unknown'
 
@@ -1516,6 +1517,14 @@ export interface SuggestedFoodItem {
   sourceNote?: string
   /** Popularity signal inferred from review text. */
   popularityHint?: 'best_seller' | 'popular' | 'often_mentioned' | 'recommended' | 'unknown'
+  /**
+   * Recommendation framing for the dish — drives the small chip on the item.
+   * Optional and additive. Never implies sales/order data (use `popularityHint`
+   * for review-derived popularity).
+   */
+  recommendationTag?: 'must_try' | 'safe_pick' | 'local_speciality' | 'kid_friendly'
+  /** Dietary flags, e.g. ['veg'], ['contains-nuts'], ['vegan'] — advisory, never a safety guarantee. */
+  dietaryTags?: string[]
 }
 
 
@@ -1631,7 +1640,13 @@ export interface GeneratedActivity {
     name: string
     address?: string
     rating?: number
+    /** Total Google review count — shown alongside the rating for trust. */
+    userRatingsTotal?: number
     priceLevel?: number
+    /** Cuisine/type labels derived from Google place types (e.g. ['Seafood', 'Goan']). */
+    cuisineTypes?: string[]
+    /** Whether Google reports the place open at fetch time (advisory only). */
+    openNow?: boolean
     lat: number
     lng: number
   }
@@ -1646,6 +1661,16 @@ export interface GeneratedActivity {
   /** Menu/website URL from Google Place Details (never scraped — shown as a link only). */
   menuSourceUrl?: string
   menuSourceType?: 'google_place_website' | 'google_place_menu' | 'unknown'
+  /**
+   * Where the food suggestion came from: a real Google place ('google') or local
+   * cuisine inference ('ai'). Drives whether a "Verified" badge may be shown — an
+   * AI-only suggestion must never claim verification.
+   */
+  foodSuggestionSource?: 'google' | 'ai'
+  /** Short "why this meal here" note (route/timing/local-cuisine rationale). */
+  foodWhyHere?: string
+  /** Smart pairing line (cuisine + meal time + local speciality), e.g. "Pair prawn curry rice with a kokum cooler." */
+  foodPairingNote?: string
   // Phase 16F — location context (elevation / weather / AQI / time zone). Optional.
   activityContext?: ActivityContext
 }

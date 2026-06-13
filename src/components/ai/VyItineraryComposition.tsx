@@ -79,20 +79,35 @@ function itemKey(item: SuggestedFoodItem, idx: number): string {
 function itemBasisLabel(basis: SuggestedFoodItem['basis'], confidence: SuggestedFoodItem['confidence']): string {
   switch (basis) {
     case 'user_entered': return 'Confirmed price'
-    case 'official_menu_or_website': return 'Menu-based estimate'
-    case 'google_review_item_mentions': return 'Review-mentioned dish'
+    case 'official_menu_or_website': return 'Menu-inspired'
+    case 'google_review_item_mentions': return 'Review-mentioned'
     case 'google_review_price_clues': return 'Review-based estimate'
-    case 'google_price_level': return 'Google price-level estimate'
+    case 'google_price_level': return 'Google price-level'
+    case 'local_cuisine_inference': return 'AI suggested'
     case 'restaurant_type_city_heuristic':
-    default: return confidence === 'low' ? 'Heuristic estimate' : 'Estimate'
+    default: return confidence === 'low' ? 'AI suggested' : 'Estimate'
   }
 }
+/**
+ * Popularity from review text — never claims sales/order data. "Best seller"
+ * wording is avoided unless we have real menu/order data (we don't), so the
+ * strongest review signal reads as "Popular pick".
+ */
 function popularityHintLabel(hint: SuggestedFoodItem['popularityHint']): string | null {
   switch (hint) {
-    case 'best_seller': return '★ Best seller'
-    case 'popular': return '★ Popular'
-    case 'often_mentioned': return 'Often mentioned'
-    case 'recommended': return 'Recommended'
+    case 'best_seller': return 'Popular pick'
+    case 'popular': return 'Popular pick'
+    case 'often_mentioned': return 'Review-mentioned'
+    case 'recommended': return 'Recommended in reviews'
+    default: return null
+  }
+}
+function recommendationTagLabel(tag: SuggestedFoodItem['recommendationTag']): string | null {
+  switch (tag) {
+    case 'must_try': return 'Must-try'
+    case 'local_speciality': return 'Local favourite'
+    case 'safe_pick': return 'Safe pick'
+    case 'kid_friendly': return 'Kid-friendly'
     default: return null
   }
 }
@@ -186,6 +201,7 @@ function VySuggestedItems({
         const isRemoved = removed.has(key)
         const badge = vegBadge(item.vegType)
         const ph = item.popularityHint && item.popularityHint !== 'unknown' ? popularityHintLabel(item.popularityHint) : null
+        const rec = recommendationTagLabel(item.recommendationTag)
         return (
           <div key={key} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, fontSize: 11, opacity: isRemoved ? 0.45 : 1 }}>
             <button type="button" onClick={() => onToggleItem(key)} style={{ padding: 3, borderRadius: 5, background: 'transparent', border: 'none', cursor: 'pointer', color: isRemoved ? 'var(--text-muted)' : 'var(--coral-500)' }} title={isRemoved ? 'Add back (counts in budget)' : 'Remove (excluded from budget)'}>
@@ -193,6 +209,7 @@ function VySuggestedItems({
             </button>
             <span style={{ fontWeight: 600, color: 'var(--text-strong)', textDecoration: isRemoved ? 'line-through' : undefined }}>{item.name}</span>
             {badge && <Badge size="sm" variant={badge.tone} style={{ fontSize: 9, padding: '2px 6px' }}>{badge.label}</Badge>}
+            {rec && <Badge size="sm" variant="teal" style={{ fontSize: 9, padding: '2px 6px' }}>{rec}</Badge>}
             {ph && <Badge size="sm" variant="violet" style={{ fontSize: 9, padding: '2px 6px' }}>{ph}</Badge>}
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-muted)' }}>{formatCurrency(item.estimatedPriceMin, currency)}–{formatCurrency(item.estimatedPriceMax, currency)}/person</span>
             <Badge size="sm" variant="neutral" style={{ fontSize: 9, padding: '2px 6px' }} title={item.sourceNote}>{itemBasisLabel(item.basis, item.confidence)}</Badge>
@@ -237,7 +254,14 @@ function VyActivityRow({
     ? `${act._locationContext.locality}${act._locationContext.city && act._locationContext.city !== act._locationContext.locality ? `, ${act._locationContext.city}` : ''}`
     : act._locationContext?.city ?? undefined
 
-  const hasDescription = !!(act.whyRecommended || act.foodInsightNotes || act.routeNotes || act._placeAddress || act.suggestedPlaceSearchQuery || act.timeToSpend)
+  // A food break with local/AI suggestions but NO real Google source (neither a
+  // restaurantSuggestion nor a geo-verified place). Such a slot must never be
+  // marked "verified".
+  const rs = act.restaurantSuggestion
+  const isAiFood = act.category === 'food' && !rs && v !== 'verified' &&
+    (act.foodSuggestionSource === 'ai' || (act.suggestedItems != null && act.suggestedItems.length > 0))
+
+  const hasDescription = !!(act.whyRecommended || act.foodInsightNotes || act.routeNotes || act._placeAddress || act.suggestedPlaceSearchQuery || act.timeToSpend || act.foodWhyHere || act.foodPairingNote)
 
   return (
     <div style={{ display: 'flex', gap: 12, fontFamily: 'var(--font-sans)', opacity: removed ? 0.5 : 1 }}>
@@ -287,7 +311,7 @@ function VyActivityRow({
             <button onClick={onToggleRemove} title={removed ? 'Restore' : 'Remove'} style={{ flex: '0 0 auto', width: 28, height: 28, borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', color: removed ? 'var(--text-muted)' : 'var(--coral-500)' }}>
               <i className={'fas fa-' + (removed ? 'rotate-left' : 'trash-can')} style={{ fontSize: 13 }} />
             </button>
-            {(hasDescription || act.restaurantSuggestion) && (
+            {(hasDescription || act.restaurantSuggestion || isAiFood) && (
               <button onClick={() => setOpen(!open)} aria-label="Toggle details" style={{ flex: '0 0 auto', width: 24, color: 'var(--text-faint)', background: 'transparent', border: 'none', cursor: 'pointer' }}>
                 <i className="fas fa-chevron-down" style={{ fontSize: 13, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform var(--dur-base) var(--ease-out)' }} />
               </button>
@@ -296,10 +320,15 @@ function VyActivityRow({
 
           {/* trust / status badges */}
           <div className="flex items-center flex-wrap gap-1.5" style={{ marginTop: 8 }}>
-            {act.isBreak && <Badge variant="orange" size="sm">Break</Badge>}
-            {v === 'verified' && !suspect && <Badge variant="teal" size="sm"><i className="fas fa-shield-check" style={{ fontSize: 9 }} /> Verified</Badge>}
+            {/* Food break with no real place → clearly AI-suggested, never "verified". */}
+            {isAiFood && <Badge variant="sun" size="sm"><i className="fas fa-wand-magic-sparkles" style={{ fontSize: 9 }} /> AI suggested meal break</Badge>}
+            {!isAiFood && act.isBreak && !rs && <Badge variant="orange" size="sm">Break</Badge>}
+            {/* Real Google restaurant suggestion for a food slot. */}
+            {rs && act.category === 'food' && <Badge variant="teal" size="sm"><i className="fas fa-shield-check" style={{ fontSize: 9 }} /> Google place</Badge>}
+            {/* Geo-verified real place (non-food, or food matched to a Google place). */}
+            {!isAiFood && !rs && v === 'verified' && !suspect && <Badge variant="teal" size="sm"><i className="fas fa-shield-check" style={{ fontSize: 9 }} /> Verified</Badge>}
             {suspect && <Badge variant="coral" size="sm"><i className="fas fa-shield-halved" style={{ fontSize: 9 }} /> Verify match</Badge>}
-            {v === 'unverified' && !suspect && <Badge variant="sun" size="sm"><i className="fas fa-triangle-exclamation" style={{ fontSize: 9 }} /> Unverified</Badge>}
+            {!isAiFood && v === 'unverified' && !suspect && <Badge variant="sun" size="sm"><i className="fas fa-triangle-exclamation" style={{ fontSize: 9 }} /> Unverified</Badge>}
             {act._autoCategory && <Badge variant="violet" size="sm">Auto-category</Badge>}
             {act._placeRating != null && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>★ {act._placeRating}{act._placeUserRatings ? ` (${act._placeUserRatings})` : ''}</span>}
             {act._mealTimeIssue && <Badge variant="sun" size="sm"><i className="fas fa-triangle-exclamation" style={{ fontSize: 8 }} /> Meal time adjusted</Badge>}
@@ -326,24 +355,36 @@ function VyActivityRow({
             )
           )}
 
-          {/* restaurant suggestion (food) */}
-          {act.restaurantSuggestion && act.category === 'food' && (
+          {/* restaurant suggestion (food, Google-backed) */}
+          {rs && act.category === 'food' && (
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--green-700)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-              <i className="fas fa-shield-check" style={{ fontSize: 10 }} />
-              <span style={{ fontWeight: 600 }}>{act.restaurantSuggestion.name}</span>
-              {act.restaurantSuggestion.rating != null && <span style={{ color: 'var(--text-muted)' }}>★{act.restaurantSuggestion.rating}</span>}
+              <i className="fas fa-utensils" style={{ fontSize: 10 }} />
+              <span style={{ fontWeight: 600 }}>{rs.name}</span>
+              {rs.rating != null && <span style={{ color: 'var(--text-muted)' }}>★{rs.rating}{rs.userRatingsTotal ? ` · ${rs.userRatingsTotal.toLocaleString()} reviews` : ''}</span>}
+              {rs.cuisineTypes && rs.cuisineTypes.length > 0 && <span style={{ color: 'var(--text-muted)' }}>· {rs.cuisineTypes.join(' · ')}</span>}
+              {rs.openNow === true && <Badge variant="teal" size="sm" style={{ fontSize: 9, padding: '1px 6px' }}>Open now</Badge>}
+              {rs.openNow === false && <Badge variant="neutral" size="sm" style={{ fontSize: 9, padding: '1px 6px' }}>Closed now</Badge>}
               {act.estimatedSpendRange && (
                 <span style={{ color: 'var(--text-muted)' }}>· ≈{formatCurrency(act.estimatedSpendRange.perPersonMin, currency)}–{formatCurrency(act.estimatedSpendRange.perPersonMax, currency)}/person{act.spendConfidence === 'high' ? '' : ' (est.)'}</span>
               )}
+            </div>
+          )}
+          {/* AI-suggested meal break (no real place) — soft, honest note */}
+          {isAiFood && (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--sun-700)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+              <i className="fas fa-circle-info" style={{ fontSize: 10 }} />
+              <span>Restaurant not verified yet — local dish ideas below. Pick a place on the spot or resolve it via Google.</span>
             </div>
           )}
 
           <VyContextLines ctx={act._activityContext} />
 
           {/* expandable drawer: description, tips, food items + edit controls */}
-          {open && (hasDescription || act.restaurantSuggestion) && (
+          {open && (hasDescription || act.restaurantSuggestion || isAiFood) && (
             <div style={{ marginTop: 11, paddingTop: 11, borderTop: '1px dashed var(--border-subtle)' }}>
               {act.whyRecommended && <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: 'var(--text-body)' }}>{act.whyRecommended}</p>}
+              {act.foodWhyHere && <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--text-body)' }}><i className="fas fa-location-crosshairs" style={{ marginRight: 6, fontSize: 10, color: 'var(--teal-500)' }} />Why here: {act.foodWhyHere}</p>}
+              {act.foodPairingNote && <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}><i className="fas fa-wine-glass" style={{ marginRight: 6, fontSize: 10, color: 'var(--coral-400)' }} />{act.foodPairingNote}</p>}
               {act.foodInsightNotes && <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}><i className="fas fa-utensils" style={{ marginRight: 6, fontSize: 10 }} />{act.foodInsightNotes}</p>}
               {act.routeNotes && <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}><i className="fas fa-compass" style={{ marginRight: 6, fontSize: 10 }} />{act.routeNotes}</p>}
               {act.timeToSpend && <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}><i className="fas fa-hourglass-half" style={{ marginRight: 6, fontSize: 10 }} />Suggested time: {act.timeToSpend}</p>}

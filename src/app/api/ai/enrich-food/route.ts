@@ -23,6 +23,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { searchPlaces, fetchPlaceDetails, isMapsAvailable } from '@/lib/maps/googleServer'
+import { localPairingNote } from '@/lib/ai/localFoodSuggestions'
 import type { FoodPreference, SuggestedFoodItem, SuggestedFoodItemBasis } from '@/types'
 import type { PlaceSearchResult } from '@/types'
 
@@ -626,6 +627,7 @@ const SOURCE_NOTE: Record<SuggestedFoodItemBasis, string> = {
   google_review_price_clues: 'Estimated from review price clues; menu price not confirmed.',
   google_price_level: 'Estimated from Google price level and restaurant type.',
   restaurant_type_city_heuristic: 'Heuristic estimate only.',
+  local_cuisine_inference: 'Local cuisine suggestion (AI inference) — not from a specific restaurant menu.',
   user_entered: 'Entered by you.',
   unknown: 'Estimate only.',
 }
@@ -671,7 +673,9 @@ function buildSuggestedItems(
         const share = m.category === 'food' ? 0.5 : m.category === 'drink' ? 0.25 : m.category === 'snack' ? 0.35 : 0.2
         const min = Math.max(1, Math.round(spend.perPersonMin * share))
         const max = Math.max(min + 1, Math.round(spend.perPersonMax * share))
-        return {
+        const recommendationTag: SuggestedFoodItem['recommendationTag'] | undefined =
+          m.popularityHint === 'best_seller' || m.popularityHint === 'popular' ? 'must_try' : undefined
+        const item: SuggestedFoodItem = {
           name: m.name,
           category: m.category,
           role: inferDishRole(m.name, m.category),
@@ -684,6 +688,8 @@ function buildSuggestedItems(
           sourceNote: SOURCE_NOTE['google_review_item_mentions'],
           popularityHint: m.popularityHint,
         }
+        if (recommendationTag) item.recommendationTag = recommendationTag
+        return item
       })
   } else {
     // ── Fall back to locale-aware templates ──
@@ -870,7 +876,10 @@ export interface FoodEnrichmentPatch {
     name: string
     address?: string
     rating?: number
+    userRatingsTotal?: number
     priceLevel?: number
+    cuisineTypes?: string[]
+    openNow?: boolean
     lat: number
     lng: number
   }
@@ -883,6 +892,32 @@ export interface FoodEnrichmentPatch {
   menuSourceType?: 'google_place_website' | 'google_place_menu' | 'unknown'
   /** Set when the restaurant is a pure-veg establishment. */
   dietaryNote?: string
+  /** Always 'google' here — the suggestion is backed by a real Google place. */
+  foodSuggestionSource: 'google'
+  /** Short "why this meal here" note. */
+  foodWhyHere?: string
+  /** Smart pairing line for the meal. */
+  foodPairingNote?: string
+}
+
+/** Human-readable cuisine/type labels from Google place types (for the trust line). */
+function deriveCuisineTypes(types: string[] | undefined): string[] {
+  if (!types || types.length === 0) return []
+  const MAP: Record<string, string> = {
+    cafe: 'Café', coffee_shop: 'Café', bakery: 'Bakery', bar: 'Bar',
+    meal_takeaway: 'Takeaway', meal_delivery: 'Delivery', fast_food_restaurant: 'Fast food',
+    vegetarian_restaurant: 'Pure veg', vegan_restaurant: 'Vegan',
+    seafood_restaurant: 'Seafood', indian_restaurant: 'Indian', chinese_restaurant: 'Chinese',
+    italian_restaurant: 'Italian', sushi_restaurant: 'Sushi', pizza_restaurant: 'Pizza',
+    ice_cream_shop: 'Desserts', dessert_shop: 'Desserts', breakfast_restaurant: 'Breakfast',
+    fine_dining_restaurant: 'Fine dining',
+  }
+  const out: string[] = []
+  for (const t of types) {
+    const label = MAP[t]
+    if (label && !out.includes(label)) out.push(label)
+  }
+  return out.slice(0, 3)
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -958,6 +993,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ? 'Pure veg restaurant — non-veg dishes not suggested here.'
         : undefined
 
+    const rating = details?.rating ?? top.rating
+    const userRatingsTotal = details?.userRatingsTotal ?? top.userRatingsTotal
+    const cuisineTypes = deriveCuisineTypes(details?.types ?? top.types)
+    const openNow = details?.openNow
+
+    // "Why here" — route/timing + a real trust signal from Google.
+    const mealLabel = fa.mealType === 'cafe' ? 'café stop' : (fa.mealType ?? 'meal')
+    const trust = rating != null ? `Rated ${rating}★${userRatingsTotal ? ` (${userRatingsTotal.toLocaleString()} reviews)` : ''} on Google.` : 'A Google-listed option for this slot.'
+    const foodWhyHere = `Picked for your ${mealLabel} near the day's route in ${destination}. ${trust}`
+
     patches.push({
       dayIdx: fa.dayIdx,
       actIdx: fa.actIdx,
@@ -965,8 +1010,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         placeId: top.placeId,
         name: details?.name ?? top.name,
         address: (details?.address ?? top.address) || undefined,
-        rating: details?.rating ?? top.rating,
+        rating,
+        userRatingsTotal,
         priceLevel,
+        ...(cuisineTypes.length ? { cuisineTypes } : {}),
+        ...(openNow != null ? { openNow } : {}),
         lat: top.lat,
         lng: top.lng,
       },
@@ -980,6 +1028,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       spendBasis: spend.basis,
       reasonTags: tags,
       suggestedItems,
+      foodSuggestionSource: 'google',
+      foodWhyHere,
+      foodPairingNote: localPairingNote(destination, fa.mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'cafe' | undefined),
       ...(menuSourceUrl ? { menuSourceUrl, menuSourceType } : {}),
       ...(dietaryNote ? { dietaryNote } : {}),
     })
