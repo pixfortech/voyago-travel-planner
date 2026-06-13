@@ -272,8 +272,18 @@ function attachLocalFoodSuggestions(result: TripGeneratorResult, brief: TripBrie
       if (!suggestion) return act
       const perPersonMid = suggestion.items.reduce((s, it) => s + (it.estimatedPriceMin + it.estimatedPriceMax) / 2, 0)
       const n = Math.max(1, brief.travellerCount)
+      // Rename generic placeholder titles ("Lunch break", "Meal stop" etc.) to
+      // something useful — the locality gives the user immediate context.
+      const locality = act.locationName?.trim() || undefined
+      const mealLabel = mealSlotLabel(act.mealType)
+      const aiTitle = isGenericFoodTitle(act.title)
+        ? locality
+          ? `${mealLabel} ideas near ${locality}`
+          : `Local ${mealLabel.toLowerCase()} ideas in ${brief.destination}`
+        : act.title
       return {
         ...act,
+        title: aiTitle,
         suggestedItems: suggestion.items,
         foodSuggestionSource: 'ai' as const,
         foodWhyHere: suggestion.whyHere,

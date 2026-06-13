@@ -373,7 +373,46 @@ function VyActivityRow({
           {isAiFood && (
             <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--sun-700)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
               <i className="fas fa-circle-info" style={{ fontSize: 10 }} />
-              <span>Restaurant not verified yet — local dish ideas below. Pick a place on the spot or resolve it via Google.</span>
+              <span>No verified restaurant — local dish ideas shown. Find a real place using the button below.</span>
+            </div>
+          )}
+
+          {/* ── Collapsed-card food content (visible without expanding) ── */}
+          {isAiFood && act.suggestedItems && act.suggestedItems.length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {act.suggestedItems.slice(0, 5).map((item, idx) => {
+                const rec = recommendationTagLabel(item.recommendationTag)
+                const vb = vegBadge(item.vegType)
+                return (
+                  <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, background: 'var(--ink-50)', border: '1px solid var(--border-soft)', borderRadius: 6, padding: '3px 8px', color: 'var(--text-body)' }}>
+                    {vb && <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: vb.tone === 'teal' ? '#16a34a' : '#dc2626' }} />}
+                    <span style={{ fontWeight: 600 }}>{item.name}</span>
+                    {rec && <span style={{ color: 'var(--text-muted)', fontSize: 10 }}> · {rec}</span>}
+                  </span>
+                )
+              })}
+            </div>
+          )}
+          {isAiFood && act.foodWhyHere && (
+            <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              <i className="fas fa-circle-info" style={{ marginRight: 5, fontSize: 10, color: 'var(--teal-500)' }} />{act.foodWhyHere}
+            </p>
+          )}
+          {isAiFood && act.foodPairingNote && (
+            <p style={{ margin: '4px 0 0', fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic', lineHeight: 1.45 }}>
+              <i className="fas fa-wine-glass" style={{ marginRight: 5, fontSize: 10, color: 'var(--coral-400)' }} />{act.foodPairingNote}
+            </p>
+          )}
+          {isAiFood && (
+            <div style={{ marginTop: 8 }}>
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`restaurants near ${act.locationName || act._locationContext?.locality || act._locationContext?.city || 'here'}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--teal-700)', textDecoration: 'none', border: '1px solid var(--teal-200)', borderRadius: 8, padding: '4px 10px', background: 'var(--teal-50)' }}
+              >
+                <i className="fas fa-magnifying-glass" style={{ fontSize: 10 }} /> Find restaurants nearby
+              </a>
             </div>
           )}
 
