@@ -1724,6 +1724,20 @@ export interface TripGeneratorResult {
   approximateLabel: string
 }
 
+/** Safe, non-sensitive AI usage + cost metadata (no prompt text, no keys). */
+export interface AiUsageCostMeta {
+  provider: 'anthropic' | 'mock'
+  model: string
+  isMock: boolean
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens?: number
+  cacheReadInputTokens?: number
+  totalTokens: number
+  estimatedCostUsd: number
+  estimatedCostInr?: number
+}
+
 /** API response envelope for POST /api/ai/trip-generator. */
 export interface TripGeneratorResponse {
   result: TripGeneratorResult
@@ -1732,6 +1746,8 @@ export interface TripGeneratorResponse {
   model: string
   /** Which path produced the result: real AI, explicit dev mock, or unavailable. */
   generationSource?: 'anthropic' | 'dev_mock' | 'unavailable'
+  /** Optional usage/cost metadata for this generation (UI-ignored; analytics only). */
+  usage?: AiUsageCostMeta
 }
 
 // ── Phase 15D — New-Trip AI Draft Generator: budget split, stay base,

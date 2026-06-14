@@ -6,7 +6,7 @@
  * can NEVER be mistaken for real model output, and `isMock` is always true.
  */
 
-import { AI_MODELS } from './models'
+import { resolveModel } from './models'
 import type { AiProvider, AiCompleteOptions, AiCompletion } from './types'
 
 export const MOCK_LABEL = '[DEV MOCK — not real AI output]'
@@ -23,8 +23,15 @@ export function createMockProvider(): AiProvider {
         text: `${MOCK_LABEL} (tier: ${tier}) This is a placeholder response generated locally without any AI model. Prompt preview: "${echo}"`,
         provider: 'mock',
         isMock: true,
-        model: AI_MODELS[tier],
+        model: resolveModel(tier, options.premium),
+        // Mock makes no real API call → zero usage → $0.00 cost.
+        usage: { inputTokens: 0, outputTokens: 0 },
       }
+    },
+    async countTokens(options: AiCompleteOptions): Promise<number> {
+      // Rough char-based estimate (~4 chars/token); never calls a real API.
+      const chars = options.messages.reduce((n, m) => n + m.content.length, 0) + (options.system?.length ?? 0)
+      return Math.ceil(chars / 4)
     },
   }
 }

@@ -15,7 +15,9 @@
 
 import { NextResponse } from 'next/server'
 import { resolveAiProvider } from '@/lib/ai/provider'
-import { AI_MODELS } from '@/lib/ai/models'
+import { resolveModel } from '@/lib/ai/models'
+import { logAiUsage } from '@/lib/ai/cost'
+import { recordAiUsage } from '@/lib/ai/usageAnalytics'
 import { rateLimit, clientKey } from '@/lib/server/rateLimit'
 import {
   TRIP_GENERATOR_SYSTEM_PROMPT,
@@ -82,16 +84,21 @@ export async function POST(request: Request) {
     )
   }
 
+  // Resolved generation model id (Sonnet 4.6 by default; premium via env toggle).
+  const generationModel = resolveModel('generation')
+
   if (provider.isMock) {
     // Only reached when AI_PROVIDER=mock is explicitly set (local dev opt-in).
     // resolveAiProvider() throws in production if no key is configured, so this
     // path is unreachable in production.
+    const usage = logAiUsage({ model: generationModel, provider: 'mock', isMock: true, context: 'trip-generator' })
     const payload: TripGeneratorResponse = {
       result: mockTripGeneratorResult(input),
       isMock: true,
       provider: 'mock',
-      model: AI_MODELS.generation,
+      model: generationModel,
       generationSource: 'dev_mock',
+      usage,
     }
     return NextResponse.json(payload)
   }
@@ -104,6 +111,22 @@ export async function POST(request: Request) {
   // thinking for a generation-quality task may consume several thousand thinking tokens
   // on top of that, so 20000 gives safe headroom without hitting model limits.
   const isDev = process.env.NODE_ENV !== 'production'
+  const userMessageContent = buildTripGeneratorUserMessage(input)
+
+  // Opt-in pre-generation token count (AI_DEBUG_COST=true). Off by default — it
+  // costs an extra API round-trip, so it never runs on the normal prod path.
+  if (process.env.AI_DEBUG_COST === 'true' && provider.countTokens) {
+    try {
+      const promptTokens = await provider.countTokens({
+        tier: 'generation',
+        system: TRIP_GENERATOR_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userMessageContent }],
+      })
+      console.log(`[AI COST] pre-count model=${generationModel} promptTokens≈${promptTokens} ctx=trip-generator`)
+    } catch (err) {
+      console.warn('[Voyago AI] trip-generator: token pre-count failed (non-fatal):', err instanceof Error ? err.message : err)
+    }
+  }
 
   let completion: Awaited<ReturnType<typeof provider.complete>>
   try {
@@ -111,7 +134,7 @@ export async function POST(request: Request) {
       tier: 'generation',
       system: TRIP_GENERATOR_SYSTEM_PROMPT,
       maxTokens: 20000,
-      messages: [{ role: 'user', content: buildTripGeneratorUserMessage(input) }],
+      messages: [{ role: 'user', content: userMessageContent }],
     })
   } catch (err) {
     // Log full error detail server-side for Cloud Run / local diagnosis.
@@ -140,8 +163,9 @@ export async function POST(request: Request) {
         result: mockResult,
         isMock: true,
         provider: 'mock',
-        model: AI_MODELS.generation,
+        model: generationModel,
         generationSource: 'dev_mock',
+        usage: logAiUsage({ model: generationModel, provider: 'mock', isMock: true, context: 'trip-generator' }),
         _devWarning: `[DEV] Real AI call failed (HTTP ${errStatus ?? 'n/a'}): ${errMsg}. Showing mock data. Fix: set AI_PROVIDER=mock in .env.local to skip real calls.`,
       }
       return NextResponse.json(payload)
@@ -156,6 +180,17 @@ export async function POST(request: Request) {
   // Step 2: parse the structured JSON from Claude's response.
   // parseTripGeneratorResult now throws instead of silently falling back to mock,
   // so a parse failure surfaces as an error rather than injecting mock content.
+  // Track usage + cost for this generation (dev console log + safe metadata).
+  const usage = logAiUsage({
+    model: completion.model,
+    usage: completion.usage,
+    provider: completion.provider,
+    isMock: completion.isMock,
+    context: 'trip-generator',
+  })
+  // Optional admin-only analytics (env-gated, best-effort, no prompt text).
+  recordAiUsage(usage, { feature: 'trip-generator', dayCount: input.dayCount, mode: input.mode })
+
   try {
     const result = parseTripGeneratorResult(completion.text, input)
     const payload: TripGeneratorResponse = {
@@ -164,6 +199,7 @@ export async function POST(request: Request) {
       provider: completion.provider,
       model: completion.model,
       generationSource: 'anthropic',
+      usage,
     }
     return NextResponse.json(payload)
   } catch (err) {
@@ -179,8 +215,9 @@ export async function POST(request: Request) {
         result: mockResult,
         isMock: true,
         provider: 'mock',
-        model: AI_MODELS.generation,
+        model: generationModel,
         generationSource: 'dev_mock',
+        usage,
         _devWarning: '[DEV] Response parse failed. Check server console for the raw response preview. Showing mock data.',
       }
       return NextResponse.json(payload)

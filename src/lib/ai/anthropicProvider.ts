@@ -8,8 +8,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import { AI_MODELS, ADAPTIVE_THINKING_TIERS } from './models'
-import type { AiProvider, AiCompleteOptions, AiCompletion } from './types'
+import { ADAPTIVE_THINKING_TIERS, resolveModel } from './models'
+import type { AiProvider, AiCompleteOptions, AiCompletion, AiUsage } from './types'
 
 let client: Anthropic | null = null
 
@@ -24,7 +24,7 @@ export function createAnthropicProvider(apiKey: string): AiProvider {
     isMock: false,
     async complete(options: AiCompleteOptions): Promise<AiCompletion> {
       const tier = options.tier ?? 'chat'
-      const model = AI_MODELS[tier]
+      const model = resolveModel(tier, options.premium)
 
       const message = await getClient(apiKey).messages.create({
         model,
@@ -41,7 +41,26 @@ export function createAnthropicProvider(apiKey: string): AiProvider {
         .map((block) => block.text)
         .join('')
 
-      return { text, provider: 'anthropic', isMock: false, model }
+      // Capture token usage for cost tracking (cache fields may be null/absent).
+      const u = message.usage
+      const usage: AiUsage = {
+        inputTokens: u?.input_tokens ?? 0,
+        outputTokens: u?.output_tokens ?? 0,
+        ...(u?.cache_creation_input_tokens != null ? { cacheCreationInputTokens: u.cache_creation_input_tokens } : {}),
+        ...(u?.cache_read_input_tokens != null ? { cacheReadInputTokens: u.cache_read_input_tokens } : {}),
+      }
+
+      return { text, provider: 'anthropic', isMock: false, model, usage }
+    },
+    async countTokens(options: AiCompleteOptions): Promise<number> {
+      const tier = options.tier ?? 'chat'
+      const model = resolveModel(tier, options.premium)
+      const res = await getClient(apiKey).messages.countTokens({
+        model,
+        ...(options.system ? { system: options.system } : {}),
+        messages: options.messages.map((m) => ({ role: m.role, content: m.content })),
+      })
+      return res.input_tokens
     },
   }
 }
