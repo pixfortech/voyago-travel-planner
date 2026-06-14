@@ -58,6 +58,29 @@ export function nearestStations(
   return out.slice(0, limit)
 }
 
+/**
+ * Generic nearest-by-coordinate over ANY records carrying optional lat/lng
+ * (e.g. imported `StationMasterRecord[]`). Records without coordinates are
+ * skipped (never assigned invented coordinates). Closest first.
+ */
+export function nearestByCoords<T extends { lat?: number; lng?: number }>(
+  lat: number,
+  lng: number,
+  items: T[],
+  opts: NearestStationOptions = {},
+): { item: T; distanceKm: number }[] {
+  const limit = opts.limit ?? 6
+  const maxDistanceKm = opts.maxDistanceKm ?? 150
+  const out: { item: T; distanceKm: number }[] = []
+  for (const it of items) {
+    if (it.lat == null || it.lng == null) continue
+    const distanceKm = haversineKm(lat, lng, it.lat, it.lng)
+    if (distanceKm <= maxDistanceKm) out.push({ item: it, distanceKm: Math.round(distanceKm * 10) / 10 })
+  }
+  out.sort((a, b) => a.distanceKm - b.distanceKm)
+  return out.slice(0, limit)
+}
+
 export interface NearestStationSplit {
   /** Closest station of any size. */
   nearest: NearbyStation | null

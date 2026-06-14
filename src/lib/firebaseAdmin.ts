@@ -10,6 +10,7 @@
 import 'server-only'
 import { cert, getApps, initializeApp, type App } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
+import { getFirestore, type Firestore } from 'firebase-admin/firestore'
 
 let app: App | null = null
 
@@ -50,4 +51,9 @@ export function getAdminApp(): App {
 /** Verify a Firebase ID token and return its decoded claims. */
 export async function verifyIdToken(idToken: string) {
   return getAuth(getAdminApp()).verifyIdToken(idToken)
+}
+
+/** Server-side Firestore handle (Admin SDK). Throws if Admin is unconfigured. */
+export function getAdminFirestore(): Firestore {
+  return getFirestore(getAdminApp())
 }

@@ -1,0 +1,12 @@
+Zone,Division,Station Code,Station Name,STN Number,Valid From,Valid To,Gauge,Traffic
+KR,Karwar,MAO,Madgaon Junction,03126,01-01-1998,31-12-9999,BG,Coaching
+SWR,Hubballi,VSG,Vasco Da Gama,03128,01-01-1998,31-12-9999,BG,Both
+KR,Karwar,KRMI,Karmali,03145,01-01-1998,31-12-9999,BG,Coaching
+KR,Karwar,THVM,Thivim,03140,01-01-1998,31-12-9999,BG,Coaching
+KR,Karwar,PERN,Pernem,03139,01-01-1998,31-12-9999,BG,Coaching
+KR,Karwar,CNO,Canacona,03132,01-01-1998,31-12-9999,BG,Coaching
+SWR,Hubballi,QLM,Kulem,03130,01-01-1998,31-12-9999,BG,Coaching
+KR,Karwar,SVM,Sanvordem Church,03129,01-01-1998,31-12-9999,BG,Both
+KR,Karwar,RN,Ratnagiri,03101,01-01-1998,31-12-9999,BG,Both
+KR,Karwar,XGOODS1,Madgaon Goods Yard,03999,01-01-2000,31-12-9999,BG,Goods
+KR,Karwar,XOLD1,Old Decommissioned Halt,03998,01-01-1990,31-12-2005,MG,Coaching

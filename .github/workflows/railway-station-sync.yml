@@ -1,0 +1,54 @@
+# Daily station-master sync (Phase 5).
+#
+# Firebase App Hosting (Cloud Run) has no native cron, so the daily refresh is
+# driven here and calls the deployed, secret-protected sync endpoint
+# (/api/admin/railway-sync). The endpoint does the actual parse + Firestore
+# upsert server-side.
+#
+# Runs ONLY when both repo secrets are configured — otherwise it exits cleanly,
+# so forks / unconfigured repos never error:
+#   - RAILWAY_SYNC_URL      e.g. https://<app-host>/api/admin/railway-sync
+#   - RAILWAY_SYNC_SECRET   must match the deployment's RAILWAY_SYNC_SECRET env
+#
+# Schedule is 03:30 IST (= 22:00 UTC), a low-traffic hour. Adjust the cron below
+# (GitHub Actions cron is UTC) or trigger manually via "Run workflow".
+
+name: Railway station sync
+
+on:
+  schedule:
+    - cron: '0 22 * * *' # 22:00 UTC = 03:30 IST daily
+  workflow_dispatch: {}
+
+# Never run more than one sync at a time.
+concurrency:
+  group: railway-station-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Trigger station-master import
+        env:
+          SYNC_URL: ${{ secrets.RAILWAY_SYNC_URL }}
+          SYNC_SECRET: ${{ secrets.RAILWAY_SYNC_SECRET }}
+        run: |
+          if [ -z "$SYNC_URL" ] || [ -z "$SYNC_SECRET" ]; then
+            echo "RAILWAY_SYNC_URL / RAILWAY_SYNC_SECRET not configured — skipping sync."
+            exit 0
+          fi
+          echo "Triggering station-master import at $SYNC_URL"
+          code=$(curl -sS -o /tmp/sync-out.json -w "%{http_code}" \
+            --connect-timeout 15 --max-time 600 \
+            -X POST "$SYNC_URL" \
+            -H "x-railway-sync-secret: $SYNC_SECRET")
+          echo "HTTP $code"
+          cat /tmp/sync-out.json || true
+          echo ""
+          if [ "$code" -ge 400 ]; then
+            echo "Sync failed (HTTP $code)"
+            exit 1
+          fi
+          echo "Sync OK."
