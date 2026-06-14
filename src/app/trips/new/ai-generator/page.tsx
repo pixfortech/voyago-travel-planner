@@ -20,6 +20,7 @@ import GeneratedItineraryPreview, {
 import VyBriefForm from '@/components/ai/VyBriefForm'
 import { type TripBrief } from '@/components/ai/briefTypes'
 import { buildLocalFoodSuggestion } from '@/lib/ai/localFoodSuggestions'
+import { nearestStationSplit } from '@/lib/railway/nearestStations'
 import { useLayout } from '@/context/LayoutContext'
 import { useMapsStatus } from '@/lib/maps/useMapsStatus'
 import { getDayCount } from '@/lib/utils'
@@ -999,9 +1000,20 @@ export default function NewTripAiGeneratorPage() {
     const destinationStructured = ds?.city
       ? { city: ds.city, state: ds.state, country: 'India' as const, lat: ds.lat, lng: ds.lng }
       : undefined
-    const nearestRailwayStation = brief.railwayStation
+    // Prefer a station the traveller explicitly noted; otherwise derive the
+    // nearest known station from the destination coordinates (geographic
+    // context only — never presented as a booking). This is what surfaces
+    // MAO/THVM/VSG etc. for a Goa trip with no manual station pick.
+    let nearestRailwayStation = brief.railwayStation
       ? { name: brief.railwayStation.name, code: brief.railwayStation.code, city: brief.railwayStation.city, state: brief.railwayStation.state }
       : undefined
+    if (!nearestRailwayStation && ds?.lat != null && ds?.lng != null) {
+      const split = nearestStationSplit(ds.lat, ds.lng, { maxDistanceKm: 120 })
+      const pick = split.nearestMajor?.station ?? split.nearest?.station
+      if (pick) {
+        nearestRailwayStation = { name: pick.name, code: pick.code, city: pick.city, state: pick.state }
+      }
+    }
     const nearestAirport = brief.airport
       ? { name: brief.airport.name, iataCode: brief.airport.iataCode, city: brief.airport.city, state: brief.airport.state }
       : undefined
